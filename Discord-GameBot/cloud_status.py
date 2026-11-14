@@ -10,9 +10,12 @@ DATA_FILE = Path(os.environ.get('PLAYER_STATUS_FILE') or (
     Path(__file__).resolve().parent.parent / 'Minecraft-Discord-Bridge' / '.discord-mcbe' / 'data.json'))
 GAMES = {
     'unlimited': ('unlimited', [('up', 'Level'), ('wingame', '勝利数'), ('killCount', 'キル数'), ('deathCount', 'デス数')]),
-    'MINIGAMER': ('mini_neo', [('rocal', 'RocalCoin')]),
+    'MINIGAMER': ('mini_neo', [('levellevel', 'Level'), ('rankrank', 'Rank'), ('RCrocal', 'RocalCoin'), ('winwin', 'Win'), ('matchmatch', 'Match')]),
     'MurderMysteryRe:MASTER': ('MurderMystery', [('Murder', '殺人鬼陣営になった回数'), ('Crew', '村人陣営になった回数'), ('wingame', '勝利数')]),
 }
+
+
+EMBED_COLOURS = {'MINIGAMER': 0x3498DB, 'unlimited': 0x9966CC, 'MurderMysteryRe:MASTER': 0xE2041B}
 
 
 def classify(entry, registry):
@@ -44,16 +47,13 @@ def find_status(data, name, game):
             continue
         board = entry['scoreboard']
         key = next((key for key, _ in metrics if key.lower() == board.lower()), None)
-        if game_key == 'mini_neo' and 'minigamer_neo' in board.lower():
-            key = 'rocal'
         if key is None:
             continue
         snapshot = snapshots.get(entry['worldName'], {}).get('scoreboards', {}).get(board, {})
         player = snapshot.get('players', {}).get(name.lower())
         if not isinstance(player, dict) or type(player.get('score')) not in (int, float):
             continue
-        if key != 'rocal' or key not in scores or board.lower() == 'rocal':
-            scores[key] = player['score']
+        scores[key] = player['score']
         if snapshot.get('updatedAt'):
             updated.append(snapshot['updatedAt'])
     return scores, min(updated) if updated else 0
@@ -105,7 +105,7 @@ async def respond(interaction, game, name, opponent=None):
         log.exception('Failed to read player snapshots')
         content = '成績を読み込めませんでした。しばらくしてから再実行してください。'
     if opponent is None:
-        embed = discord.Embed(title='Minecraft プレイヤーステータス', description=content, colour=0x3498DB)
+        embed = discord.Embed(title='Minecraft プレイヤーステータス', description=content, colour=EMBED_COLOURS.get(game, 0x3498DB))
         await interaction.edit_original_response(content=None, embed=embed, allowed_mentions=discord.AllowedMentions.none())
     else:
         await interaction.edit_original_response(content=content, allowed_mentions=discord.AllowedMentions.none())
