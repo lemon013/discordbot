@@ -36,8 +36,12 @@ def decode_snapshot(raw, secret, previous=0):
         raise ValueError('Invalid signature')
     item = json.loads(payload)
     stamp = item['sent_at']
-    if item.get('version') != 1 or type(stamp) is not int or stamp <= previous or stamp > time.time_ns() + 300_000_000_000:
-        raise ValueError('Invalid version or stale timestamp')
+    if item.get('version') != 1 or type(stamp) is not int:
+        raise ValueError('Invalid version or timestamp')
+    if stamp <= previous:
+        raise ValueError('Snapshot already received or older than saved data')
+    if stamp > time.time_ns() + 300_000_000_000:
+        raise ValueError('PC clock is more than 5 minutes ahead of cloud clock')
     data = item['data']
     registry, snapshots = data[REGISTRY], data[SNAPSHOTS]
     if not isinstance(registry, list) or not isinstance(snapshots, dict):
@@ -73,24 +77,41 @@ def atomic_write(path, data):
 
 
 async def receive_latest(bot, channel_id, sender_id, secret, path):
+    path = Path(path)
     channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
     try:
         previous = json.loads(path.read_text(encoding='utf-8-sig')).get('cloud_sync:sent_at', 0)
     except (FileNotFoundError, json.JSONDecodeError):
         previous = 0
+    result = 'No minecraft-status.json found in the last 50 messages; check MC_SYNC_CHANNEL_ID and PC upload'
     async for message in channel.history(limit=50):
-        if message.author.id != sender_id or message.content != 'minecraft-status-sync-v1':
+        attachments = [a for a in message.attachments if a.filename == 'minecraft-status.json']
+        if not attachments:
             continue
-        for attachment in message.attachments:
-            if attachment.filename != 'minecraft-status.json' or attachment.size > MAX_BYTES:
+        if message.author.id != sender_id:
+            if result.startswith('No minecraft-status.json'):
+                result = (f'Snapshot sender ID {message.author.id} differs from MC_SYNC_SENDER_ID={sender_id}; '
+                          'set MC_SYNC_SENDER_ID to the PC Bot user ID')
+            continue
+        # The signed attachment and configured sender authenticate the snapshot.
+        # Message content can be empty when Discord withholds Message Content.
+        for attachment in attachments:
+            if attachment.size > MAX_BYTES:
+                result = 'Snapshot exceeds transport limit'
                 continue
             try:
                 data = decode_snapshot(await attachment.read(), secret, previous)
-            except (ValueError, KeyError, TypeError):
+            except (ValueError, KeyError, TypeError) as error:
+                if str(error) == 'Snapshot already received or older than saved data':
+                    return result if result.startswith('Snapshot rejected:') else 'up-to-date'
+                reason = ('Invalid signature; check that MC_SYNC_SECRET is identical on PC and MWS'
+                          if str(error) == 'Invalid signature' else str(error))
+                result = f'Snapshot rejected: {reason}'
                 continue
             await asyncio.to_thread(atomic_write, path, data)
-            log.info('Minecraft scores synchronized from PC')
-            return
+            log.info('Minecraft scores synchronized from PC: worlds=%s, file=%s', len(data[SNAPSHOTS]), path)
+            return 'synchronized'
+    return result
 
 
 async def sync_loop(bot):
@@ -104,9 +125,14 @@ async def sync_loop(bot):
     if not channel.isdecimal() or not sender.isdecimal() or len(secret) < 32:
         log.error('Score sync requires channel ID, PC Bot ID and a shared secret of at least 32 characters')
         return
+    log.info('Minecraft score sync started: channel=%s, PC Bot=%s, file=%s', channel, sender, DATA_FILE)
+    last_result = None
     while not bot.is_closed():
         try:
-            await receive_latest(bot, int(channel), int(sender), secret, DATA_FILE)
+            result = await receive_latest(bot, int(channel), int(sender), secret, DATA_FILE)
+            if result not in ('synchronized', 'up-to-date') and result != last_result:
+                log.warning('Minecraft score sync waiting: %s', result)
+            last_result = result
         except asyncio.CancelledError:
             raise
         except Exception:
