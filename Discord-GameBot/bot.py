@@ -477,7 +477,10 @@ async def on_ready():
         from snapshot_sync import sync_loop
         bot._minecraft_sync_task = asyncio.create_task(sync_loop(bot))
     try:
-        if TEST_GUILD_ID:
+        if CLOUD_MODE:
+            from command_sync import sync_cloud_commands
+            await sync_cloud_commands(bot, TEST_GUILD_ID)
+        elif TEST_GUILD_ID:
             guild = discord.Object(id=int(TEST_GUILD_ID)); bot.tree.copy_global_to(guild=guild); await bot.tree.sync(guild=guild)
         else: await bot.tree.sync()
     except Exception: log.exception('Command sync failed')
@@ -691,4 +694,8 @@ async def on_app_command_error(interaction, error):
     except discord.HTTPException: pass
 
 if not TOKEN: raise RuntimeError('DISCORD_BOT_TOKEN が設定されていません。.env を確認してください。')
+if CLOUD_MODE:
+    for command_name in ('link', 'delete'):
+        bot.tree.remove_command(command_name)
+
 bot.run(TOKEN)
