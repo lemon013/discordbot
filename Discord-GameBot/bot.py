@@ -654,21 +654,32 @@ class Game8192View(discord.ui.View):
 @bot.tree.command(name='8192game', description='1/8192の確率に挑戦する運試しゲーム')
 @app_commands.guild_only()
 async def game_8192(interaction: discord.Interaction):
+    age = (discord.utils.utcnow() - interaction.created_at).total_seconds()
+    log.info('/8192game received: id=%s age=%.3fs pid=%s', interaction.id, age, os.getpid())
+    await interaction.response.defer(thinking=True)
     player_id = interaction.user.id
     if player_id in solo_8192_games:
-        return await interaction.response.send_message(
-            'すでに1/8192 GAMEに挑戦中です。表示されているボードから続けてください。',
-            ephemeral=True
+        await interaction.edit_original_response(
+            content='すでに1/8192 GAMEに挑戦中です。表示されているボードから続けてください。'
         )
+        return
 
     solo_8192_games[player_id] = 0
-    view = Game8192View(player_id, 0)
-    await interaction.response.send_message(embed=game_8192_embed(0), view=view)
+    try:
+        view = Game8192View(player_id, 0)
+        await interaction.edit_original_response(embed=game_8192_embed(0), view=view)
+    except Exception:
+        solo_8192_games.pop(player_id, None)
+        raise
 
 
 @bot.tree.error
 async def on_app_command_error(interaction, error):
-    log.error('Application command error: %r', error)
+    original = getattr(error, 'original', error)
+    log.error('Application command error: %r', error, exc_info=(type(original), original, original.__traceback__))
+    if isinstance(original, discord.NotFound) and original.code == 10062:
+        log.warning('Interaction expired before acknowledgement; check receive age, network latency and duplicate bot processes')
+        return
     try:
         msg = 'コマンドの実行中にエラーが発生しました。Botのログを確認してください。'
         if interaction.response.is_done(): await interaction.followup.send(msg, ephemeral=True)
