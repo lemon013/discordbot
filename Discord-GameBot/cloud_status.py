@@ -104,4 +104,8 @@ async def respond(interaction, game, name, opponent=None):
     except Exception:
         log.exception('Failed to read player snapshots')
         content = '成績を読み込めませんでした。しばらくしてから再実行してください。'
-    await interaction.edit_original_response(content=content, allowed_mentions=discord.AllowedMentions.none())
+    if opponent is None:
+        embed = discord.Embed(title='Minecraft プレイヤーステータス', description=content, colour=0x3498DB)
+        await interaction.edit_original_response(content=None, embed=embed, allowed_mentions=discord.AllowedMentions.none())
+    else:
+        await interaction.edit_original_response(content=content, allowed_mentions=discord.AllowedMentions.none())
