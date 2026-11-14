@@ -3,7 +3,7 @@ import { deferInteraction } from './interaction.js';
 const REGISTRY_KEY = 'custom_player_status:saved_scoreboards';
 const SNAPSHOT_KEY = 'custom_player_status:snapshots';
 const POLL_INTERVAL_MS = 10_000;
-const MANAGER_MC_IDS = new Set(['yumokiti4325', 'greenview777']);
+const MANAGER_MC_IDS = new Set(['yumokiti4325', 'greenview777', 'niwatori0815']);
 let pollPromise;
 
 /** @param {import('@discord-mcbe/server').Application} app */
@@ -24,9 +24,9 @@ function send(player, text) { player.sendMessage(text).catch(() => {}); }
 export function setupPlayerStatusChat(app) {
   app.before('minecraftMessage', (event) => {
     const message = event.message.trim();
-    if (!message.toLowerCase().startsWith('!save')) return true;
+    if (!message.toLowerCase().startsWith('!save') && !/^!scoreremove(?:\s|$)/i.test(message)) return true;
     const player = event.sender;
-    if (!isManager(player)) { send(player, '§c[保存設定] このコマンドは yumokiti4325 または GreenView777 のみ実行できます。'); return false; }
+    if (!isManager(player)) { send(player, '§c[保存設定] このコマンドは許可された管理者のみ実行できます。'); return false; }
     const saveMatch = message.match(/^!savescore\s+([^\s]+)\s*$/i);
     if (saveMatch) {
       const scoreboard = saveMatch[1], worldName = event.world.name, registry = getRegistry(app);
@@ -60,7 +60,7 @@ export function setupPlayerStatusChat(app) {
 
   return false;
 }
-    const removeMatch = message.match(/^!saveremove\s+(.+\S)\s+([^\s]+)\s*$/i);
+    const removeMatch = message.match(/^!(?:saveremove|scoreremove)\s+(.+\S)\s+([^\s]+)\s*$/i);
     if (removeMatch) {
       const worldName = removeMatch[1], scoreboard = removeMatch[2], registry = getRegistry(app);
       const next = registry.filter((entry) => !(entry.worldName === worldName && entry.scoreboard === scoreboard));
@@ -73,7 +73,7 @@ export function setupPlayerStatusChat(app) {
       }
       return false;
     }
-    send(player, '§e使い方: !savescore <scoreboard> / !savelist / !saveremove <world> <scoreboard>');
+    send(player, '§e使い方: !savescore <scoreboard> / !savelist / !saveremove <world> <scoreboard> / !scoreremove <world> <scoreboard>');
     return false;
   });
 }
