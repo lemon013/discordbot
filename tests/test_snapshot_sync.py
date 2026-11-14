@@ -20,6 +20,20 @@ def sample(score=42):
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_unlimited_scores_render_after_sync(self):
+        from cloud_status import find_status, render
+        world = 'Unlimited-test-world'
+        expected = {'up': 1234, 'wingame': 12, 'killCount': 34, 'deathCount': 0}
+        data = {REGISTRY: [{'worldName': world, 'scoreboard': board, 'gameKey': 'unlimited'}
+                           for board in expected],
+                SNAPSHOTS: {world: {'scoreboards': {
+                    board: {'updatedAt': 1794659238496, 'players': {
+                        'alice': {'name': 'Alice', 'score': score}}}
+                    for board, score in expected.items()}}}}
+        decoded = decode_snapshot(encode_snapshot(data, SECRET), SECRET)
+        self.assertEqual(find_status(decoded, 'Alice', 'unlimited')[0], expected)
+        self.assertIn('1234', render(decoded, 'unlimited', 'Alice'))
+
     def test_roundtrip_and_private_data_excluded(self):
         original = sample()
         original['custom_link:links'] = {'secret': 'must-not-upload'}
@@ -57,6 +71,62 @@ class SnapshotTests(unittest.TestCase):
 
 
 class ReceiverTests(unittest.TestCase):
+    def run_mocked(self, coroutine):
+        from unittest.mock import patch
+        async def immediate(function, *args):
+            return function(*args)
+        with patch('snapshot_sync.asyncio.to_thread', immediate):
+            try:
+                coroutine.send(None)
+            except StopIteration as completed:
+                return completed.value
+            self.fail('Unexpected external I/O in mocked receiver test')
+
+    def test_signed_attachment_without_message_content(self):
+        result, saved = self.run_mocked(self.diagnostic_case(content=''))
+        self.assertEqual(result, 'synchronized')
+        self.assertEqual(saved[SNAPSHOTS], sample()[SNAPSHOTS])
+
+    def test_wrong_sender_is_reported_without_saving(self):
+        result, saved = self.run_mocked(self.diagnostic_case(sender=9))
+        self.assertIn('sender ID 9 differs from MC_SYNC_SENDER_ID=7', result)
+        self.assertIsNone(saved)
+
+    def test_wrong_secret_is_reported_without_saving(self):
+        result, saved = self.run_mocked(self.diagnostic_case(secret='different-secret'))
+        self.assertIn('MC_SYNC_SECRET is identical', result)
+        self.assertIsNone(saved)
+
+    def test_rejected_new_snapshot_not_hidden_by_older_saved_snapshot(self):
+        result, saved = self.run_mocked(self.diagnostic_case(secret='different-secret', older=True))
+        self.assertIn('MC_SYNC_SECRET is identical', result)
+        self.assertEqual(saved['cloud_sync:sent_at'], 100)
+
+    async def diagnostic_case(self, content='minecraft-status-sync-v1', sender=7, secret=SECRET, older=False):
+        raw = encode_snapshot(sample(), SECRET)
+        class Attachment:
+            filename = 'minecraft-status.json'
+            size = len(raw)
+            async def read(self):
+                return raw
+        messages = [SimpleNamespace(author=SimpleNamespace(id=sender), content=content, attachments=[Attachment()])]
+        if older:
+            class OlderAttachment(Attachment):
+                async def read(self):
+                    return encode_snapshot(sample(), secret, 100)
+            messages.append(SimpleNamespace(author=SimpleNamespace(id=7), content=content, attachments=[OlderAttachment()]))
+        class Channel:
+            async def history(self, limit):
+                for message in messages:
+                    yield message
+        bot = SimpleNamespace(get_channel=lambda channel: Channel())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'data.json'
+            if older:
+                atomic_write(path, decode_snapshot(encode_snapshot(sample(), secret, 100), secret))
+            result = await receive_latest(bot, 1, 7, secret, path)
+            return result, json.loads(path.read_text(encoding='utf-8')) if path.exists() else None
+
     def test_sender_filter_and_catchup_after_restart(self):
         # The receiver's I/O boundaries are mocked; no sockets or event loop needed.
         from unittest.mock import patch
