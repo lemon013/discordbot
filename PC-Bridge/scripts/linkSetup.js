@@ -3,7 +3,7 @@ import { setupLinkChat, handleLinkInteraction, linkCommandData } from '../../Min
 import { isAcknowledgementError } from '../../Minecraft-Discord-Bridge/scripts/interaction.js';
 import { handleDeleteInteraction, deleteCommandData } from '../../Minecraft-Discord-Bridge/scripts/delete.js';
 
-const CLOUD_COMMANDS = new Set(['player', 'vs', 'wordwolfex', '8192game', 'tensei']);
+const CLOUD_COMMANDS = new Set(['player', 'vs', 'wordwolfex', '8192game', 'tensei', 'kakigoori']);
 
 // Install before app.start(): ClientReady precedes the Bridge's async bulk
 // registration. discordReady is emitted only after that registration completes.
