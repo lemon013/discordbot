@@ -85,7 +85,7 @@ def render(data, game, name, opponent=None):
             delta = values[0] - values[1] if all(v is not None for v in values) else None
             line += f' （差: {delta:+g}）' if delta is not None else ' （差: 比較不可）'
         lines.append(line)
-    lines.append('保存済みの成績です。Minecraftの現在値は自動取得していません。')
+    lines.append('最終取得時点の成績です。記録更新時刻をご確認ください。')
     for value, (_, timestamp) in zip(names, statuses):
         if timestamp:
             lines.append(f'{safe(value)} の記録更新: <t:{int(timestamp / 1000)}:R>')

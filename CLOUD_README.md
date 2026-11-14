@@ -1,27 +1,19 @@
 # MWSでのクラウド起動
 
-1. このプロジェクトのフォルダ構成を保ったままMWSへアップロードします。
-2. Pythonを選び、起動ファイルを cloud_main.py に設定します。
-   ルートの mws.config にも main=cloud_main.py を指定しています。
-3. 環境変数 DISCORD_BOT_TOKEN にBotのトークンを設定します。
-   必要に応じて TEST_GUILD_ID にDiscordサーバーIDを指定します。
-4. 元の main.py / Bridge をクラウドで起動している場合は停止し、クラウド版を起動します。
-   同じBotトークンを使うPC側の旧Botも同時起動しないでください。
+MWSはPythonで cloud_main.py を起動してください。DISCORD_BOT_TOKEN はゲームBotのトークンです。
+ゲーム、/player status、/vs はクラウドで利用できます。
 
-利用可能: /wordwolfex、/8192game、/player status、/vs。
-/link と /delete はクラウド版では利用不可のメッセージを返します。
-Minecraftチャット連携やワールドへの接続は行いません。Bunは不要です。
+## PCのチャット連携・成績自動同期
 
-## 成績データ
+設定手順は [PC_CLOUD_SETUP.md](PC_CLOUD_SETUP.md) を参照してください。
+PC側の専用Botと署名付きDiscord添付を経由して成績を同期します。
+MWS側に MC_SYNC_CHANNEL_ID / MC_SYNC_SENDER_ID / MC_SYNC_SECRET を設定して再起動します。
+未設定なら従来どおり保存済み成績だけを表示します。
+PCを閉じている間もクラウドのゲームと最後に同期した成績を確認できます。
+PCとワールドが起動中のときだけ、チャット連携と最新成績の取得が動きます。
 
-参照先: Minecraft-Discord-Bridge/.discord-mcbe/data.json
-アップロード時に .discord-mcbe フォルダも含めてください。
-このファイルは空のデータで上書きしないでください。
-別の場所を使う場合は PLAYER_STATUS_FILE にファイルパスを指定できます。
-
-クラウドは保存済みデータのみ表示します。現在のワールドから自動取得しません。
-PC側で最新データを取得した後、この data.json をMWS側の同じ場所へ
-アップロードして置き換えると、次回のコマンドから反映されます。
-PCからの自動同期は含んでいません。
+参照・保存先は既定で Minecraft-Discord-Bridge/.discord-mcbe/data.json です。
+PLAYER_STATUS_FILE で書き込み可能な永続保存先を変更できます。
+.env・トークン・共有キー・成績ファイルはGitHubにアップロードしないでください。
 
 クラウドサービス側の停止・再起動・利用期限には影響を受けます。

@@ -472,6 +472,10 @@ async def on_message(message):
 @bot.event
 async def on_ready():
     log.info('Logged in as %s', bot.user)
+    if CLOUD_MODE and (not hasattr(bot, '_minecraft_sync_task') or bot._minecraft_sync_task.done()):
+        import asyncio
+        from snapshot_sync import sync_loop
+        bot._minecraft_sync_task = asyncio.create_task(sync_loop(bot))
     try:
         if TEST_GUILD_ID:
             guild = discord.Object(id=int(TEST_GUILD_ID)); bot.tree.copy_global_to(guild=guild); await bot.tree.sync(guild=guild)

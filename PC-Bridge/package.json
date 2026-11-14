@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@discord-mcbe/server": "4.0.0-beta.10",
+    "@discord-mcbe/shared": "4.0.0-beta.10"
+  }
+}
