@@ -1,3 +1,5 @@
+import { setupPCLink } from './linkSetup.js';
+
 const REGISTRY = 'custom_player_status:saved_scoreboards';
 const SNAPSHOTS = 'custom_player_status:snapshots';
 const managers = new Set(['yumokiti4325', 'greenview777']);
@@ -71,5 +73,10 @@ export default async function main(app) {
   };
   await poll();
   setInterval(poll, 10000);
-  app.logger.info('[PC] Chat bridge and score collection ready; cloud commands are not registered here');
+  try {
+    await setupPCLink(app);
+  } catch (error) {
+    app.logger.error('[PC Link] Could not register /link; check GUILD_ID and Bot command permissions', error);
+  }
+  app.logger.info('[PC] Chat bridge and score collection ready; /link is handled by the PC Bot');
 }
