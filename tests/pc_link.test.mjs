@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 
-test('PC Bot registers only /link and completes a private one-use linking flow', async () => {
+test('PC Bot keeps account commands, removes duplicates and completes a private linking flow', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'pc-link-test-'));
   const previousCwd = process.cwd();
   const originalInterval = globalThis.setInterval;
@@ -18,9 +18,17 @@ test('PC Bot registers only /link and completes a private one-use linking flow',
     const { setupPCLink } = await import('../PC-Bridge/scripts/linkSetup.js');
     const hooks = [], commands = [], messages = [], errors = [];
     const player = { name: 'TestPlayer', sendMessage: async text => messages.push(text) };
-    const guild = { commands: { create: async data => commands.push(data) } };
+    const deleted = [];
+    const makeCommand = (name, scope) => ({ name, async delete() { deleted.push(`${scope}:${name}`); } });
+    const guildCommands = ['player', 'vs', 'wordwolfex', '8192game', 'list', 'unrelated'].map(name => makeCommand(name, 'guild'));
+    const globalCommands = ['link', 'delete', 'player', 'vs', 'wordwolfex', '8192game', 'list', 'unrelated-global'].map(name => makeCommand(name, 'global'));
+    const guild = { commands: {
+      create: async data => { commands.push(data); guildCommands.push(makeCommand(data.name, 'guild')); },
+      fetch: async () => new Map(guildCommands.map((command, index) => [index, command])),
+    } };
     const client = new EventEmitter();
     client.guilds = { cache: new Map([['123', guild]]) };
+    client.application = { commands: { fetch: async () => new Map(globalCommands.map((command, index) => [index, command])) } };
     const properties = new Map();
     const app = {
       env: { GUILD_ID: '123' },
@@ -31,7 +39,12 @@ test('PC Bot registers only /link and completes a private one-use linking flow',
       logger: { info() {}, debug() {}, warn() {}, error: (...args) => errors.push(args) },
     };
     await setupPCLink(app);
-    assert.deepEqual(commands.map(command => command.name), ['link']);
+    assert.deepEqual(commands.map(command => command.name), ['link', 'delete']);
+    for (const name of ['player', 'vs', 'wordwolfex', '8192game']) assert.ok(deleted.includes(`guild:${name}`));
+    for (const name of ['link', 'delete', 'player', 'vs', 'wordwolfex', '8192game', 'list']) assert.ok(deleted.includes(`global:${name}`));
+    assert.ok(!deleted.includes('guild:list'));
+    assert.ok(!deleted.includes('guild:unrelated'));
+    assert.ok(!deleted.includes('global:unrelated-global'));
     assert.equal(hooks[0]({ message: 'ordinary chat', sender: player }), true);
     assert.equal(hooks[0]({ message: '!link', sender: player }), false);
     const code = messages[0].match(/\b\d{8}\b/)[0];
@@ -63,6 +76,11 @@ test('PC Bot registers only /link and completes a private one-use linking flow',
     const reused = makeInteraction('reused');
     await listener(reused);
     assert.equal(reused.replies[0].embeds[0].color, 0xd32f2f);
+    assert.equal(readFileSync(accountPath, 'utf8'), saved);
+    const deniedDelete = makeInteraction('delete-denied');
+    deniedDelete.commandName = 'delete';
+    await listener(deniedDelete);
+    assert.equal(deniedDelete.deferOptions.flags, 64);
     assert.equal(readFileSync(accountPath, 'utf8'), saved);
 
     Date.now = () => realNow() + 6 * 60 * 1000;
