@@ -5,6 +5,16 @@ import { handleDeleteInteraction, deleteCommandData } from '../../Minecraft-Disc
 
 const CLOUD_COMMANDS = new Set(['player', 'vs', 'wordwolfex', '8192game']);
 
+// Install before app.start(): ClientReady precedes the Bridge's async bulk
+// registration. discordReady is emitted only after that registration completes.
+export function preparePCCommandRegistration(app) {
+  if (!app.__pcBuiltinCommandsReady) {
+    app.__pcBuiltinCommandsReady = new Promise(resolve => {
+      app.once('discordReady', resolve);
+    });
+  }
+}
+
 async function cleanPCCommands(app, guild) {
   for (const command of (await guild.commands.fetch()).values()) {
     if (CLOUD_COMMANDS.has(command.name)) {
@@ -56,10 +66,31 @@ export async function setupPCLink(app) {
   client.on('interactionCreate', listener);
 
   await app.bot.awaitReady();
+  if (!app.__pcBuiltinCommandsReady) {
+    throw new Error('Restart through the updated PC-Bridge/app.js to wait for Bridge command registration');
+  }
+  let registrationTimer;
+  try {
+    await Promise.race([
+      app.__pcBuiltinCommandsReady,
+      new Promise((_, reject) => {
+        registrationTimer = setTimeout(() => reject(new Error('Bridge command registration did not complete within 30 seconds')), 30000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(registrationTimer);
+  }
   const guild = client.guilds.cache.get(app.env.GUILD_ID) ?? await client.guilds.fetch(app.env.GUILD_ID);
   // Creating a same-name guild command updates it; never replace the full command list.
   await guild.commands.create(linkCommandData);
   await guild.commands.create(deleteCommandData);
   await cleanPCCommands(app, guild);
+  const registered = await guild.commands.fetch();
+  for (const name of ['link', 'delete']) {
+    if (![...registered.values()].some(command => command.name === name)) {
+      throw new Error(`PC command /${name} is missing after registration`);
+    }
+  }
+  app.logger.info(`[PC Commands] Registered in guild ${app.env.GUILD_ID}: ${[...registered.values()].map(c => '/' + c.name).join(', ')}`);
   app.logger.info('[PC Link] Minecraft !link and PC Bot /link are ready');
 }
