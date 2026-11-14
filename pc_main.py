@@ -71,11 +71,12 @@ def main():
         print('Use different channels for chat and private score sync.')
         return 1
     # Keep the original PC snapshot; copy once, never overwrite newer PC data.
-    source = ROOT / 'Minecraft-Discord-Bridge' / '.discord-mcbe' / 'data.json'
-    target = LOCAL / '.discord-mcbe' / 'data.json'
-    if source.exists() and not target.exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, target)
+    for filename in ('data.json', 'account.json'):
+        source = ROOT / 'Minecraft-Discord-Bridge' / '.discord-mcbe' / filename
+        target = LOCAL / '.discord-mcbe' / filename
+        if source.exists() and not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
     updater = ROOT / 'Minecraft-Discord-Bridge' / 'updater.exe'
     bun = shutil.which('bun')
     if bun:
