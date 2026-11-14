@@ -700,5 +700,7 @@ if CLOUD_MODE:
 
 from tensei import register_tensei
 register_tensei(bot)
+from kakigoori import register_kakigoori
+register_kakigoori(bot)
 
 bot.run(TOKEN)
