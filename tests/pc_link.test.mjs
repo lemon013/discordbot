@@ -15,15 +15,22 @@ test('PC Bot keeps account commands, removes duplicates and completes a private 
     process.chdir(directory);
     globalThis.setInterval = () => ({ unref() {} });
     globalThis.setTimeout = () => ({ unref() {} });
-    const { setupPCLink } = await import('../PC-Bridge/scripts/linkSetup.js');
+    const { setupPCLink, preparePCCommandRegistration } = await import('../PC-Bridge/scripts/linkSetup.js');
     const hooks = [], commands = [], messages = [], errors = [];
     const player = { name: 'TestPlayer', sendMessage: async text => messages.push(text) };
     const deleted = [];
-    const makeCommand = (name, scope) => ({ name, async delete() { deleted.push(`${scope}:${name}`); } });
+    const makeCommand = (name, scope) => ({ name, async delete() {
+      deleted.push(`${scope}:${name}`);
+      const list = scope === 'guild' ? guildCommands : globalCommands;
+      list.splice(list.indexOf(this), 1);
+    } });
     const guildCommands = ['player', 'vs', 'wordwolfex', '8192game', 'list', 'unrelated'].map(name => makeCommand(name, 'guild'));
     const globalCommands = ['link', 'delete', 'player', 'vs', 'wordwolfex', '8192game', 'list', 'unrelated-global'].map(name => makeCommand(name, 'global'));
     const guild = { commands: {
-      create: async data => { commands.push(data); guildCommands.push(makeCommand(data.name, 'guild')); },
+      create: async data => {
+        commands.push(data);
+        if (!guildCommands.some(command => command.name === data.name)) guildCommands.push(makeCommand(data.name, 'guild'));
+      },
       fetch: async () => new Map(guildCommands.map((command, index) => [index, command])),
     } };
     const client = new EventEmitter();
@@ -38,13 +45,26 @@ test('PC Bot keeps account commands, removes duplicates and completes a private 
       minecraft: { getWorlds: () => [] },
       logger: { info() {}, debug() {}, warn() {}, error: (...args) => errors.push(args) },
     };
-    await setupPCLink(app);
+    const events = new EventEmitter();
+    app.once = events.once.bind(events);
+    preparePCCommandRegistration(app);
+    const starting = setupPCLink(app);
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(commands.length, 0, 'Wait for the slow Bridge bulk registration before creating custom commands');
+    // Model the library replacing guild commands after the client is ready.
+    // The custom commands must be added only AFTER this operation.
+    guildCommands.push(makeCommand('ping', 'guild'));
+    events.emit('discordReady');
+    await starting;
     assert.deepEqual(commands.map(command => command.name), ['link', 'delete']);
     for (const name of ['player', 'vs', 'wordwolfex', '8192game']) assert.ok(deleted.includes(`guild:${name}`));
     for (const name of ['link', 'delete', 'player', 'vs', 'wordwolfex', '8192game', 'list']) assert.ok(deleted.includes(`global:${name}`));
     assert.ok(!deleted.includes('guild:list'));
     assert.ok(!deleted.includes('guild:unrelated'));
     assert.ok(!deleted.includes('global:unrelated-global'));
+    for (const name of ['list', 'ping', 'link', 'delete']) assert.ok(guildCommands.some(command => command.name === name));
+    assert.ok(!guildCommands.some(command => ['player', 'vs', 'wordwolfex', '8192game'].includes(command.name)));
     assert.equal(hooks[0]({ message: 'ordinary chat', sender: player }), true);
     assert.equal(hooks[0]({ message: '!link', sender: player }), false);
     const code = messages[0].match(/\b\d{8}\b/)[0];
