@@ -1,0 +1,69 @@
+Discord-MCBE v4.0.0-beta.10 custom script fix - revised
+
+1. /link の登録を確実に同期
+   ファイル: scripts/main.js
+   - Guild commands を fetch してから同期する方式に変更。
+   - 既存の同名 /link を削除し、現在の定義で再登録。
+   - /player は既存なら edit、なければ create。
+   - 登録後に Guild に存在する Chat Input コマンド一覧をログ出力。
+   - これにより古い /link 定義や登録状態が残っている場合を整理。
+
+2. /link の処理
+   ファイル: scripts/link.js
+   - Minecraft内で !link → プレイヤー名から連携コードを発行。
+   - Discordで /link name:<Minecraft名> code:<表示コード> を実行。
+   - コード一致時にDiscordユーザーとMinecraftアカウントを保存。
+   - 返答は deferReply() → editReply() に変更済み。
+
+3. /player status
+   ファイル: scripts/playerStatus.js
+   - Interactionを先にdeferReply()。
+   - ステータス取得後にeditReply()。
+   - バックグラウンドキャッシュpollが重複実行しないようガード追加。
+
+4. SocketSession の query タイムアウト対策
+   ファイル: app/node_modules/@discord-mcbe/server/dist/index.mjs
+   - query() のpollが前回のquery完了前に再実行されないよう pollInFlight を追加。
+   - もともと約500ms周期で開始されるqueryが、BDS応答遅延時に大量に重なる構造だったため修正。
+   - 接続切断・再接続時にガードもリセット。
+
+5. worldConnect の補助メッセージ
+   ファイル: app/node_modules/@discord-mcbe/server/dist/index.mjs
+   - Minecraftへの接続通知は await せず、タイムアウトでworldConnect処理をブロックしない。
+
+6. ESM
+   ファイル: package.json
+   - "type": "module" を追加。
+
+
+[v3] Discord Unknown application command (10063) fix
+- scripts/main.js: guild.commands.fetch({ force: true }) を使用し、古い/存在しないコマンドIDへの DELETE/EDIT が 10063 を返しても停止しないようにした。
+- /link は同名コマンドが複数ある場合のみ重複を整理し、既存コマンドを編集、無効IDなら新規作成へフォールバック。
+- /player も無効な既存IDなら新規作成へフォールバック。
+- スラッシュコマンド同期失敗でプロセスがクラッシュする経路を削減。
+
+[2026-09-29] Account storage change
+- Account link data is now stored in .discord-mcbe/account.json.
+- Removed custom_link:links as the source of truth for account linking.
+- account.json uses an array of objects with keys: mcid, discord-name, discord-id.
+- discord-id is stored as digits only.
+- discord-name is stored with only ASCII letters, digits, and underscore.
+- Discord ID and Minecraft ID are used to replace an existing conflicting link, keeping a 1-to-1 link.
+- account.json is written atomically through a temporary file.
+
+[2026-10-18] 8-digit OTP Link Improvement
+- /link コマンドの引数を code のみに簡素化（name の手動入力を廃止）。
+- 乱数による8桁のワンタイムパスコード発行に変更（有効期限5分、1回限りで失効）。
+- !link の再発行に5分間のクールダウンを設定。
+- !link 発行メッセージにコード非公開・乗っ取り注意の警告を追加。
+- !link 実行時にタグ「yumokiti」を持つプレイヤーへ管理通知を送信。
+- Discord側でコード入力ミス・失敗時に、発行者本人宛てにゲーム内警告チャットを送信。
+
+
+[2026-11-14] Game-specific player status and score registration
+- `/player status` now requires a game choice (`unlimited`, `MurderMysteryRe:MASTER`, `MINIGAMER`) and a Minecraft player name.
+- Status output is formatted separately for Unlimited, MurderMystery, and MINIGAMER.
+- `!savescore` classifies entries by world-name fragments (`Unlimited`, `人狼`) or the `MINIGAMER_NEO` scoreboard marker. Related scoreboards in the same MINIGAMER world are classified together.
+- MINIGAMER Coin lookup accepts either the `rocal` objective or a `MINIGAMER_NEO`-named objective.
+- Both `yumokiti4325` and `GreenView777` can run the score save/list/remove commands.
+- Updated the Python slash-command definition and Japanese README.

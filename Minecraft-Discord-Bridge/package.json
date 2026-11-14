@@ -1,0 +1,6 @@
+{
+  "name": "discord-mcbe-root",
+  "private": true,
+  "type": "module",
+  "dependencies": {}
+}
