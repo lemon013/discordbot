@@ -2,7 +2,7 @@ import { setupPCLink } from './linkSetup.js';
 
 const REGISTRY = 'custom_player_status:saved_scoreboards';
 const SNAPSHOTS = 'custom_player_status:snapshots';
-const managers = new Set(['yumokiti4325', 'greenview777']);
+const managers = new Set(['yumokiti4325', 'greenview777', 'niwatori0815']);
 
 function classify(world, board, registry) {
   const name = world.toLowerCase();
@@ -18,7 +18,7 @@ export default async function main(app) {
   const registry = () => app.properties.get(REGISTRY) ?? [];
   app.before('minecraftMessage', event => {
     const message = event.message.trim();
-    if (!message.toLowerCase().startsWith('!save')) return true;
+    if (!message.toLowerCase().startsWith('!save') && !/^!scoreremove(?:\s|$)/i.test(message)) return true;
     const send = text => event.sender.sendMessage(text).catch(() => {});
     if (!managers.has(event.sender.name.toLowerCase())) {
       send('§cこの操作を実行する権限がありません。'); return false;
@@ -36,12 +36,12 @@ export default async function main(app) {
       send(registry().map(e => `${e.worldName} / ${e.scoreboard}`).join('\n') || '保存対象はありません。');
       return false;
     }
-    const remove = message.match(/^!saveremove\s+(.+\S)\s+(\S+)\s*$/i);
+    const remove = message.match(/^!(?:saveremove|scoreremove)\s+(.+\S)\s+(\S+)\s*$/i);
     if (remove) {
       app.properties.set(REGISTRY, registry().filter(e => e.worldName !== remove[1] || e.scoreboard !== remove[2]));
       send('§a保存対象を更新しました。'); return false;
     }
-    send('!savescore <scoreboard> / !savelist / !saveremove <world> <scoreboard>');
+    send('!savescore <scoreboard> / !savelist / !saveremove <world> <scoreboard> / !scoreremove <world> <scoreboard>');
     return false;
   });
   let polling = false;
