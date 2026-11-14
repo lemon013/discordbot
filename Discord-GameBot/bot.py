@@ -698,4 +698,7 @@ if CLOUD_MODE:
     for command_name in ('link', 'delete'):
         bot.tree.remove_command(command_name)
 
+from tensei import register_tensei
+register_tensei(bot)
+
 bot.run(TOKEN)
