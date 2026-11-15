@@ -11,6 +11,8 @@ function classify(world, board, registry) {
   if (name.includes('unlimited')) return 'unlimited';
   if (name.includes('murdermystery') || name.includes('人狼')) return 'MurderMystery';
   if (name.includes('minigamer')) return 'mini_neo';
+  const boards = new Set([board.toLowerCase(), ...registry.filter(e => e.worldName === world).map(e => e.scoreboard.toLowerCase())]);
+  if (boards.has('murder') && boards.has('crew')) return 'MurderMystery';
   return null;
 }
 
@@ -50,6 +52,14 @@ export default async function main(app) {
     polling = true;
     try {
       const entries = registry(), snapshots = app.properties.get(SNAPSHOTS) ?? {};
+      let reclassified = false;
+      for (const entry of entries) {
+        if (!entry.gameKey) {
+          const gameKey = classify(entry.worldName, entry.scoreboard, entries);
+          if (gameKey) { entry.gameKey = gameKey; reclassified = true; }
+        }
+      }
+      if (reclassified) app.properties.set(REGISTRY, entries);
       for (const world of app.minecraft.getWorlds()) {
         const state = snapshots[world.name] ?? {worldName: world.name, scoreboards: {}};
         let changed = false;
