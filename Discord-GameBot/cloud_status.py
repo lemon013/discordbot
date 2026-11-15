@@ -34,6 +34,10 @@ def classify(entry, registry):
         return 'unlimited'
     if 'minigamer' in world:
         return 'mini_neo'
+    boards = {other.get('scoreboard', '').lower() for other in registry
+              if other.get('worldName') == entry.get('worldName')}
+    if {'murder', 'crew'} <= boards:
+        return 'MurderMystery'
     return None
 
 
