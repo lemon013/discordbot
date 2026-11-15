@@ -136,6 +136,34 @@ class LevelStore:
                        for user_id, count in minutes if count > 0]
             return results, cfg
 
+    def edit(self, guild_id, user_id, unit, mode, amount):
+        if unit not in ('xp', 'level') or mode not in ('add', 'subtract', 'set'):
+            raise ValueError('Invalid edit operation')
+        if not isinstance(amount, int) or amount < 0 or amount > (MAX_LEVEL if unit == 'level' else 1000000000):
+            raise ValueError('Invalid edit amount')
+        with closing(self.connect()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            cfg = self.config_in(db, guild_id)
+            row = db.execute('SELECT xp FROM level_users WHERE guild_id=? AND user_id=?',
+                             (guild_id, user_id)).fetchone()
+            old_xp = row['xp'] if row else 0
+            old_level = level_for(old_xp, cfg['base_xp'], cfg['step_xp'])
+            current = old_xp if unit == 'xp' else old_level
+            target = {'add': current + amount, 'subtract': max(0, current - amount), 'set': amount}[mode]
+            if unit == 'level':
+                target = min(MAX_LEVEL, target)
+                # Adding/subtracting zero or hitting a bound leaves progress intact.
+                new_xp = old_xp if mode != 'set' and target == old_level else threshold(target, cfg['base_xp'], cfg['step_xp'])
+            else:
+                new_xp = target
+            if new_xp > 9223372036854775807:
+                raise ValueError('XP is too large')
+            db.execute('INSERT OR IGNORE INTO level_users(guild_id,user_id) VALUES(?,?)', (guild_id, user_id))
+            # Keep earned text/voice totals and cooldowns intact; the difference is admin adjustment.
+            db.execute('UPDATE level_users SET xp=? WHERE guild_id=? AND user_id=?', (new_xp, guild_id, user_id))
+            return dict(user_id=user_id, old_xp=old_xp, xp=new_xp, before=old_level,
+                        after=level_for(new_xp, cfg['base_xp'], cfg['step_xp'])), cfg
+
     def rank(self, guild_id, user_id):
         with closing(self.connect()) as db:
             cfg = self.config_in(db, guild_id)
@@ -322,6 +350,9 @@ class Leveling:
         else:
             embed.add_field(name='次のレベルまで', value=f"{next_xp - user['xp']:,} XP（{user['xp'] - start:,} / {next_xp - start:,}）", inline=False)
         embed.add_field(name='獲得内訳', value=f"テキスト：{user['text_xp']:,} XP\nVC：{user['voice_xp']:,} XP", inline=False)
+        adjustment = user['xp'] - user['text_xp'] - user['voice_xp']
+        if adjustment:
+            embed.add_field(name='管理者によるXP調整', value=f'{adjustment:+,} XP', inline=False)
         await interaction.edit_original_response(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     async def leaderboard(self, interaction, page):
@@ -333,6 +364,31 @@ class Leveling:
             lines.append(f"**{index}位** <@{row['user_id']}> — Lv.{level} / {row['xp']:,} XP")
         embed = discord.Embed(title=f'レベルランキング — {page}ページ', description='\n'.join(lines) or 'まだデータがありません。', color=discord.Color.blue())
         await interaction.edit_original_response(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
+    async def edit(self, interaction, unit, mode, amount, member=None):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        if interaction.guild is None or not interaction.user.guild_permissions.manage_guild:
+            await interaction.edit_original_response(content='この操作には「サーバー管理」権限が必要です。')
+            return
+        member = member or interaction.user
+        if member.bot:
+            await interaction.edit_original_response(content='BotのXP・レベルは編集できません。')
+            return
+        try:
+            async with self.lock(interaction.guild_id):
+                result, cfg = await asyncio.to_thread(self.store.edit, interaction.guild_id, member.id, unit, mode, amount)
+        except ValueError:
+            await interaction.edit_original_response(content='編集値が無効です。数値は0以上、レベルの指定値は100以下にしてください。')
+            return
+        labels = {'add': '加算', 'subtract': '減算', 'set': '指定'}
+        log.info('Leveling edit guild=%s actor=%s target=%s unit=%s mode=%s amount=%s xp=%s->%s',
+                 interaction.guild_id, interaction.user.id, member.id, unit, mode, amount, result['old_xp'], result['xp'])
+        await interaction.edit_original_response(
+            content=(f"<@{member.id}> の{'XP' if unit == 'xp' else 'レベル'}を{labels[mode]}しました。\\n"
+                     f"累計XP：{result['old_xp']:,} → {result['xp']:,} XP\\n"
+                     f"レベル：Lv.{result['before']} → Lv.{result['after']}"),
+            allowed_mentions=discord.AllowedMentions.none())
+        await self.notify(interaction.guild, [result], cfg, interaction.channel)
 
     async def configure(self, interaction, changes=None):
         await interaction.response.defer(thinking=True, ephemeral=True)
@@ -401,6 +457,30 @@ def register_leveling(bot):
     async def notify(interaction: discord.Interaction, channel: discord.TextChannel | None = None):
         await service.configure(interaction, {'notify_channel': channel.id if channel else None})
 
+    choices = [
+        app_commands.Choice(name='加算', value='add'),
+        app_commands.Choice(name='減算', value='subtract'),
+        app_commands.Choice(name='指定', value='set'),
+    ]
+
+    @group.command(name='edit', description='メンバーのレベルを加算・減算・指定します')
+    @app_commands.describe(mode='編集方法', amount='レベル数（0〜100）', member='対象メンバー（省略で自分）')
+    @app_commands.choices(mode=choices)
+    async def level_edit(interaction: discord.Interaction, mode: str,
+                         amount: app_commands.Range[int, 0, 100], member: discord.Member | None = None):
+        await service.edit(interaction, 'level', mode, amount, member)
+
+    xp_group = app_commands.Group(name='xp', description='管理者用XP編集', guild_only=True,
+                                   default_permissions=discord.Permissions(manage_guild=True))
+
+    @xp_group.command(name='edit', description='メンバーのXPを加算・減算・指定します')
+    @app_commands.describe(mode='編集方法', amount='XP数（0〜1000000000）', member='対象メンバー（省略で自分）')
+    @app_commands.choices(mode=choices)
+    async def xp_edit(interaction: discord.Interaction, mode: str,
+                      amount: app_commands.Range[int, 0, 1000000000], member: discord.Member | None = None):
+        await service.edit(interaction, 'xp', mode, amount, member)
+
+    bot.tree.add_command(xp_group)
     bot.tree.add_command(group)
     for event in ('on_message', 'on_voice_state_update', 'on_ready', 'on_resumed', 'on_disconnect'):
         bot.add_listener(getattr(service, event), event)

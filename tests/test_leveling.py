@@ -132,6 +132,45 @@ class LevelStoreTests(unittest.TestCase):
         self.assertEqual(level_for(10**30, step=0), 100)
 
 
+    def test_xp_edit_add_subtract_set_floor_and_guild_isolation(self):
+        self.assertEqual(self.store.edit(1, 10, 'xp', 'add', 500)[0]['xp'], 500)
+        self.assertEqual(self.store.edit(1, 10, 'xp', 'subtract', 200)[0]['xp'], 300)
+        self.assertEqual(self.store.edit(1, 10, 'xp', 'set', 77)[0]['xp'], 77)
+        self.assertEqual(self.store.edit(1, 10, 'xp', 'subtract', 999)[0]['xp'], 0)
+        self.assertIsNone(self.store.rank(2, 10)[0]['rank'])
+        self.assertEqual(LevelStore(self.store.path).rank(1, 10)[0]['xp'], 0)
+
+    def test_level_edit_thresholds_bounds_and_noop_progress(self):
+        self.store.edit(1, 10, 'xp', 'set', 350)
+        self.assertEqual(self.store.edit(1, 10, 'level', 'add', 0)[0]['xp'], 350)
+        result, _ = self.store.edit(1, 10, 'level', 'add', 2)
+        self.assertEqual((result['before'], result['after'], result['xp']), (1, 3, threshold(3)))
+        result, _ = self.store.edit(1, 10, 'level', 'set', 30)
+        self.assertEqual((result['after'], result['xp']), (30, threshold(30)))
+        self.assertEqual(self.store.edit(1, 10, 'level', 'subtract', 100)[0]['xp'], 0)
+        self.store.edit(1, 10, 'xp', 'set', threshold(100) + 555)
+        self.assertEqual(self.store.edit(1, 10, 'level', 'add', 10)[0]['xp'], threshold(100) + 555)
+        self.assertEqual(self.store.edit(1, 10, 'level', 'set', 100)[0]['xp'], threshold(100))
+        self.assertEqual(self.store.edit(1, 10, 'level', 'set', 0)[0]['xp'], 0)
+
+    def test_manual_edits_preserve_earned_totals_and_cooldown(self):
+        self.store.award_text(1, 10, 100)
+        self.store.award_voice(1, [(10, 1)])
+        self.store.edit(1, 10, 'xp', 'add', 50)
+        self.assertIsNone(self.store.award_text(1, 10, 110)[0])
+        row, _ = self.store.rank(1, 10)
+        self.assertEqual((row['text_xp'], row['voice_xp'], row['xp']), (15, 10, 75))
+        self.store.edit(1, 10, 'level', 'set', 30)
+        row, _ = self.store.rank(1, 10)
+        self.assertEqual((row['text_xp'], row['voice_xp']), (15, 10))
+
+    def test_invalid_edit_does_not_write(self):
+        for unit, mode, amount in [('xp', 'set', -1), ('level', 'set', 101), ('xp', 'bad', 1), ('bad', 'set', 1)]:
+            with self.assertRaises(ValueError):
+                self.store.edit(1, 10, unit, mode, amount)
+        self.assertIsNone(self.store.rank(1, 10)[0]['rank'])
+
+
 class VoiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -216,7 +255,7 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
         with patch('leveling.LevelStore', return_value=self.store):
             register_leveling(bot)
-        self.assertEqual({c.name for c in bot.tree.get_commands()}, {'rank', 'leaderboard', 'level'})
+        self.assertEqual({c.name for c in bot.tree.get_commands()}, {'rank', 'leaderboard', 'level', 'xp'})
         self.assertTrue(bot.tree.get_command('level').default_permissions.manage_guild)
         self.assertTrue(bot.intents.voice_states)
         self.assertIn('on_voice_state_update', bot.extra_events)
@@ -308,6 +347,60 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         member.add_roles.assert_awaited_once()
         channel.send.assert_awaited_once()
         self.assertIn(REGULAR_MESSAGE, channel.send.call_args.args[0])
+
+
+    async def test_edit_permission_and_default_self_target(self):
+        channel = SimpleNamespace(send=AsyncMock())
+        actor = SimpleNamespace(id=90, bot=False, guild_permissions=SimpleNamespace(manage_guild=False))
+        interaction = SimpleNamespace(guild_id=1, guild=self.guild, user=actor, channel=channel,
+            response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock())
+        self.service.notify = AsyncMock()
+        await self.service.edit(interaction, 'xp', 'add', 50)
+        self.assertIsNone(self.store.rank(1, 90)[0]['rank'])
+        self.service.notify.assert_not_awaited()
+        actor.guild_permissions.manage_guild = True
+        await self.service.edit(interaction, 'xp', 'add', 50)
+        self.assertEqual(self.store.rank(1, 90)[0]['xp'], 50)
+        interaction.response.defer.assert_awaited_with(thinking=True, ephemeral=True)
+        self.assertIn('<@90>', interaction.edit_original_response.call_args.kwargs['content'])
+        self.service.notify.assert_awaited_once()
+
+    async def test_level_edit_target_grants_regular_role(self):
+        guild, member, role, channel = reward_guild()
+        member.bot = False
+        actor = SimpleNamespace(id=90, bot=False, guild_permissions=SimpleNamespace(manage_guild=True))
+        interaction = SimpleNamespace(guild_id=1, guild=guild, user=actor, channel=channel,
+            response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock())
+        await self.service.edit(interaction, 'level', 'set', 30, member)
+        self.assertEqual(self.store.rank(1, 10)[0]['xp'], threshold(30))
+        self.assertIsNone(self.store.rank(1, 90)[0]['rank'])
+        member.add_roles.assert_awaited_once()
+        self.assertTrue(any(REGULAR_MESSAGE in call.args[0] for call in channel.send.call_args_list))
+        await self.service.edit(interaction, 'level', 'subtract', 5, member)
+        self.assertEqual(level_for(self.store.rank(1, 10)[0]['xp']), 25)
+        self.assertEqual(member.add_roles.await_count, 1)
+
+    async def test_rank_shows_manual_adjustment_without_relabeling_earned_xp(self):
+        self.store.award_text(1, 10, 100)
+        self.store.edit(1, 10, 'xp', 'set', 0)
+        interaction = SimpleNamespace(guild_id=1, user=SimpleNamespace(id=10, display_name='Player'),
+            response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock())
+        await self.service.rank(interaction)
+        embed = interaction.edit_original_response.call_args.kwargs['embed']
+        adjustment = next(field for field in embed.fields if field.name == '管理者によるXP調整')
+        self.assertEqual(adjustment.value, '-15 XP')
+
+    async def test_edit_slash_command_choices_and_admin_scope(self):
+        bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
+        with patch('leveling.LevelStore', return_value=self.store):
+            service = register_leveling(bot)
+        self.assertTrue(bot.tree.get_command('xp').default_permissions.manage_guild)
+        for group, unit in [('xp', 'xp'), ('level', 'level')]:
+            command = bot.tree.get_command(group).get_command('edit')
+            self.assertEqual([choice.name for choice in command.parameters[0].choices], ['加算', '減算', '指定'])
+            service.edit = AsyncMock()
+            await command.callback('interaction', 'add', 5, None)
+            service.edit.assert_awaited_once_with('interaction', unit, 'add', 5, None)
 
 
 if __name__ == '__main__':
