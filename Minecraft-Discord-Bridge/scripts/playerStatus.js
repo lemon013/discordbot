@@ -128,6 +128,8 @@ function classifySavedScoreboard(worldName, scoreboard, registry = []) {
   if (world.includes('minigamer') && !world.includes('unlimited')) return 'mini_neo';
   if (world.includes('unlimited')) return 'unlimited';
   if (world.includes('人狼')) return 'MurderMystery';
+  const boards = new Set([objective, ...registry.filter(entry => entry.worldName === worldName).map(entry => String(entry.scoreboard).toLowerCase())]);
+  if (boards.has('murder') && boards.has('crew')) return 'MurderMystery';
   return null;
 }
 function getEntryGameKey(entry, registry) {
