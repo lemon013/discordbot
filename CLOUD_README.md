@@ -17,3 +17,15 @@ PLAYER_STATUS_FILE で書き込み可能な永続保存先を変更できます�
 .env・トークン・共有キー・成績ファイルはGitHubにアップロードしないでください。
 
 クラウドサービス側の停止・再起動・利用期限には影響を受けます。
+
+## Gemini AIチャット
+
+GitHubの最新mainをMWSへ反映し、MWSの環境変数に `GEMINI_API_KEY` を設定してBotを再起動してください。APIキーはGitHubへ保存しないでください。
+
+`./ai chat 質問` またはBotへのメンションで応答します。`./ai model`、`./ai prompt`、`./ai reasoning` は「サーバー管理」権限で変更できます。モデルの利用可否・無料枠はGoogle側の設定に従います。
+
+Discord Developer PortalでMessage Content Intentを有効にしてください。起動ファイルは従来どおり `cloud_main.py` です。
+
+AI設定は `Discord-GameBot/ai_settings.json` に保存します。MWSの再デプロイでファイルが置き換わる場合に備え、このファイルをバックアップしてください。会話履歴はメモリ内のみで再起動時に消えます。
+
+詳しいコマンド・思考設定は [AI_README.md](Discord-GameBot/AI_README.md) を参照してください。

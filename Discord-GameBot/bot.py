@@ -702,5 +702,7 @@ from tensei import register_tensei
 register_tensei(bot)
 from kakigoori import register_kakigoori
 register_kakigoori(bot)
+from gemini_chat import register_gemini
+register_gemini(bot)
 
 bot.run(TOKEN)

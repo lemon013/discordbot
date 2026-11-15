@@ -8,3 +8,5 @@ __pycache__/
 .discord-mcbe/
 *.log
 github_bot_review.py
+Discord-GameBot/ai_settings.json
+Discord-GameBot/ai_settings.tmp
