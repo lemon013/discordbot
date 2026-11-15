@@ -115,7 +115,7 @@ function pollOnce(app) {
 
 const GAME_SCOREBOARDS = {
   unlimited: ['up', 'wingame', 'killCount', 'deathCount'],
-  MurderMystery: ['Murder', 'Crew', 'wingame'],
+  MurderMystery: ['Murder', 'Crew', 'Other', 'wingame'],
   mini_neo: ['rocal'],
 };
 function classifySavedScoreboard(worldName, scoreboard, registry = []) {
@@ -158,7 +158,7 @@ function formatGameStatus(status, gameKey) {
   const value = (key) => status.scores.has(key) ? status.scores.get(key) : 0;
   const lines = [`${status.name}さんのステータスは`];
   if (gameKey === 'unlimited') lines.push(`💪${value('up')}Level | 🏆${value('wingame')} Win | ⚔️${value('killCount')} Kills | 💀${value('deathCount')} Deaths`);
-  else if (gameKey === 'MurderMystery') lines.push(`🔪殺人鬼陣営になった回数: ${value('Murder')} | 🛠️乗組員陣営になった回数: ${value('Crew')} | 🏆勝利数 ${value('wingame')}`);
+  else if (gameKey === 'MurderMystery') lines.push(`🔪殺人鬼陣営になった回数: ${value('Murder')} | 🛠️乗組員陣営になった回数: ${value('Crew')} | 第三陣営になった数: ${value('Other')} | 🏆勝利数 ${value('wingame')}`);
   else lines.push(`🪙${value('rocal')}RocalCoin`);
   if (status.updatedAt) lines.push(`更新: <t:${Math.floor(status.updatedAt / 1000)}:R>`);
   return lines.join('\n');
