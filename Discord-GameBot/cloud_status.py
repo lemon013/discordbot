@@ -11,7 +11,7 @@ DATA_FILE = Path(os.environ.get('PLAYER_STATUS_FILE') or (
 GAMES = {
     'unlimited': ('unlimited', [('up', 'Level'), ('wingame', '勝利数'), ('killCount', 'キル数'), ('deathCount', 'デス数')]),
     'MINIGAMER': ('mini_neo', [('levellevel', 'Level'), ('rankrank', 'Rank'), ('RCrocal', 'RocalCoin'), ('winwin', 'Win'), ('matchmatch', 'Match')]),
-    'MurderMysteryRe:MASTER': ('MurderMystery', [('Murder', '殺人鬼陣営になった回数'), ('Crew', '村人陣営になった回数'), ('wingame', '勝利数')]),
+    'MurderMysteryRe:MASTER': ('MurderMystery', [('Murder', '殺人鬼陣営になった回数'), ('Crew', '村人陣営になった回数'), ('Other', '第三陣営になった数'), ('wingame', '勝利数')]),
 }
 
 
