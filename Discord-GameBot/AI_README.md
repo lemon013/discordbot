@@ -3,33 +3,33 @@
 ## 最初の設定
 
 1. https://aistudio.google.com/apikey でGemini APIキーを取得します。
-2. このフォルダーの `.env` に `GEMINI_API_KEY=取得したキー` を設定します。DiscordのBotトークンとは別のキーです。チャットには貼らないでください。
+2. MWSでは環境変数に、PCではこのフォルダーの `.env` に `GEMINI_API_KEY=取得したキー` を設定します。DiscordのBotトークンとは別のキーです。チャットには貼らないでください。
 3. Botを通常の起動方法で再起動します。`START_ALL.bat` / `main.py` / `cloud_main.py` からの起動に対応します。
 4. Discord Developer Portalで、このBotの **Message Content Intent** を有効にしてください。
 5. Botには送信先の「チャンネルを見る」「メッセージを送信」権限、スレッドでは「スレッドでメッセージを送信」権限が必要です。
 
-追加ライブラリはrequirements.txtに記載済みです。手動起動する場合は先に `python -m pip install -r requirements.txt` を実行します。
+起動時にDiscordへ `/ai` コマンドを同期します。表示されない場合はBotの再起動後にDiscordを再読み込みし、Botのコマンド同期ログと `applications.commands` の導入権限を確認してください。\n\n追加ライブラリはrequirements.txtに記載済みです。手動起動する場合は先に `python -m pip install -r requirements.txt` を実行します。
 
 ## コマンド
 
-サーバー内の通常メッセージとして入力します（Discordの `/` コマンドではありません）。DMには応答しません。
+Discordのスラッシュコマンドです。`/ai` を入力してサブコマンドを選択してください。DMには応答しません。`/ai help` で使い方を確認できます。
 
 | 入力 | 動作 |
 | --- | --- |
-| `./ai` | ヘルプ |
-| `./ai chat こんにちは` | Geminiに質問 |
+| `/ai` | ヘルプ |
+| `/ai chat こんにちは` | Geminiに質問 |
 | `@Bot 質問` | 実際にBotをメンションして質問 |
-| `./ai settings` | モデル・思考設定・プロンプトを表示 |
-| `./ai models` | APIキーで利用可能なモデルを取得。無料モデル限定の一覧ではありません |
-| `./ai model gemini-2.5-flash` | モデルを変更（サーバー管理者） |
-| `./ai prompt あなたはマイクラに詳しい案内係です。` | システムプロンプト変更（サーバー管理者） |
-| `./ai prompt reset` | プロンプトを初期化（サーバー管理者） |
-| `./ai reasoning low` | 思考レベルを変更（サーバー管理者） |
-| `./ai reset` | 現在のチャンネルの共有会話履歴を削除（サーバー管理者） |
+| `/ai settings` | モデル・思考設定・プロンプトを表示 |
+| `/ai models` | APIキーで利用可能なモデルを取得。無料モデル限定の一覧ではありません |
+| `/ai model gemini-2.5-flash` | モデルを変更（サーバー管理者） |
+| `/ai prompt あなたはマイクラに詳しい案内係です。` | システムプロンプト変更（サーバー管理者） |
+| `/ai prompt reset` | プロンプトを初期化（サーバー管理者） |
+| `/ai reasoning low` | 思考レベルを変更（サーバー管理者） |
+| `/ai reset` | 現在のチャンネルの共有会話履歴を削除（サーバー管理者） |
 
-設定はサーバーごとに `ai_settings.json` に保存し、再起動後も維持します。モデル・プロンプト・思考設定の変更時は、そのサーバーの履歴を削除します。モデル変更時は思考設定もautoに戻します。プロンプトはsettingsで表示するため、秘密情報を入れないでください。
+質問への回答はチャンネルに公開し、設定・ヘルプ・モデル一覧・リセットの結果は実行者だけに表示します。\n\n設定はサーバーごとに `ai_settings.json` に保存し、再起動後も維持します。モデル・プロンプト・思考設定の変更時は、そのサーバーの履歴を削除します。モデル変更時は思考設定もautoに戻します。プロンプトはsettingsで表示するため、秘密情報を入れないでください。
 
-既定モデルは `gemini-2.5-flash`、思考設定は `auto` です。既定モデルは `.env` の `GEMINI_MODEL` でも変更できます。利用できない場合は `./ai models` で現在のモデルIDを調べて変更してください。
+既定モデルは `gemini-2.5-flash`、思考設定は `auto` です。既定モデルは `.env` の `GEMINI_MODEL` でも変更できます。利用できない場合は `/ai models` で現在のモデルIDを調べて変更してください。
 
 ## 思考設定
 

@@ -22,7 +22,7 @@ PLAYER_STATUS_FILE で書き込み可能な永続保存先を変更できます�
 
 GitHubの最新mainをMWSへ反映し、MWSの環境変数に `GEMINI_API_KEY` を設定してBotを再起動してください。APIキーはGitHubへ保存しないでください。
 
-`./ai chat 質問` またはBotへのメンションで応答します。`./ai model`、`./ai prompt`、`./ai reasoning` は「サーバー管理」権限で変更できます。モデルの利用可否・無料枠はGoogle側の設定に従います。
+`/ai chat 質問` またはBotへのメンションで応答します。`/ai model`、`/ai prompt`、`/ai reasoning` は「サーバー管理」権限で変更できます。モデルの利用可否・無料枠はGoogle側の設定に従います。
 
 Discord Developer PortalでMessage Content Intentを有効にしてください。起動ファイルは従来どおり `cloud_main.py` です。
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from contextlib import nullcontext
+from types import SimpleNamespace
 import json
 import logging
 import os
@@ -12,20 +14,21 @@ import time
 
 import aiohttp
 import discord
+from discord import app_commands
 
 API_ROOT = 'https://generativelanguage.googleapis.com/v1beta'
 DEFAULT_PROMPT = 'あなたはDiscordサーバーのアシスタントです。日本語で、親しみやすく正確に回答してください。'
 HELP = (
     '**Gemini AI**\n'
-    '`./ai chat 質問` または `@Bot 質問`\n'
-    '`./ai settings` 現在の設定\n'
-    '`./ai models` 利用可能なモデル一覧（無料とは限りません）\n'
-    '`./ai reset` このチャンネルの会話履歴を削除（サーバー管理者）\n'
+    '`/ai chat 質問` または `@Bot 質問`\n'
+    '`/ai settings` 現在の設定\n'
+    '`/ai models` 利用可能なモデル一覧（無料とは限りません）\n'
+    '`/ai reset` このチャンネルの会話履歴を削除（サーバー管理者）\n'
     '**設定変更（サーバー管理者）**\n'
-    '`./ai model モデルID`\n'
-    '`./ai prompt 指示文`（改行も可）\n'
-    '`./ai prompt reset` 初期プロンプトへ戻す\n'
-    '`./ai reasoning auto|off|minimal|low|medium|high`\n'
+    '`/ai model モデルID`\n'
+    '`/ai prompt 指示文`（改行も可）\n'
+    '`/ai prompt reset` 初期プロンプトへ戻す\n'
+    '`/ai reasoning auto|off|minimal|low|medium|high`\n'
     '思考設定の対応範囲はモデルにより異なります。\n'
     'AIへの質問と直近の会話履歴はGoogleに送信されます。'
 )
@@ -110,7 +113,7 @@ class GeminiChat:
     async def request(self, method, endpoint, payload=None):
         api_key = os.getenv('GEMINI_API_KEY', '').strip()
         if not api_key:
-            raise AIError('Gemini APIキーが未設定です。PCの Discord-GameBot/.env に GEMINI_API_KEY を設定してBotを再起動してください。')
+            raise AIError('Gemini APIキーが未設定です。Botの環境変数または Discord-GameBot/.env に GEMINI_API_KEY を設定してBotを再起動してください。')
         try:
             async with self.api_slots:
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
@@ -118,10 +121,10 @@ class GeminiChat:
                                                headers={'x-goog-api-key': api_key}, json=payload) as response:
                         if response.status != 200:
                             messages = {
-                                400: 'モデル・思考レベルの組み合わせ、または入力内容が無効です。./ai reasoning auto でもう一度試してください。',
-                                401: 'Gemini APIキーの認証に失敗しました。PC側の設定を確認してください。',
+                                400: 'モデル・思考レベルの組み合わせ、または入力内容が無効です。/ai reasoning auto でもう一度試してください。',
+                                401: 'Gemini APIキーの認証に失敗しました。Botの環境変数・設定を確認してください。',
                                 403: 'Gemini APIへのアクセスが拒否されました。キーの権限・利用地域などを確認してください。',
-                                404: 'モデルが見つかりません。./ai models で利用可能なIDを確認してください。',
+                                404: 'モデルが見つかりません。/ai models で利用可能なIDを確認してください。',
                                 429: 'Geminiの利用上限に達しました。しばらく待ってから試してください。日次上限の場合はリセットまで利用できません。',
                             }
                             raise AIError(messages.get(response.status, f'Gemini側でエラーが発生しました（HTTP {response.status}）。後で試してください。'))
@@ -156,12 +159,20 @@ class GeminiChat:
         if current:
             chunks.append(current)
         for chunk in chunks:
-            await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+            interaction = getattr(message, 'interaction', None)
+            if interaction is None:
+                await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+            elif not message.sent:
+                await interaction.edit_original_response(content=chunk, allowed_mentions=discord.AllowedMentions.none())
+                message.sent = True
+            else:
+                await interaction.followup.send(chunk, allowed_mentions=discord.AllowedMentions.none(),
+                                                ephemeral=message.ephemeral)
 
     async def chat(self, message, question):
         question = question.strip()
         if not question:
-            await self.send(message, '質問を入力してください。例：`./ai chat こんにちは`')
+            await self.send(message, '質問を入力してください。例：`/ai chat こんにちは`')
             return
         if len(question) > 6000:
             raise AIError('質問は6000文字以内にしてください。')
@@ -189,7 +200,7 @@ class GeminiChat:
         while len(self.last_used) > 1024:
             self.last_used.popitem(last=False)
         try:
-            async with message.channel.typing():
+            async with (nullcontext() if getattr(message, 'interaction', None) else message.channel.typing()):
                 data = await self.request('POST', f"/models/{settings['model']}:generateContent", payload)
                 answer, model_content = response_text(data)
                 await self.send(message, answer)
@@ -225,7 +236,7 @@ class GeminiChat:
             if action == 'model':
                 model = value.removeprefix('models/')
                 if not re.fullmatch(r'gemini-[A-Za-z0-9.\-]{1,100}', model):
-                    raise AIError('正しいGeminiモデルIDを指定してください。./ai models で確認できます。')
+                    raise AIError('正しいGeminiモデルIDを指定してください。/ai models で確認できます。')
                 s['model'], s['reasoning'] = model, 'auto'
             elif action == 'prompt':
                 if not value or len(value) > 8000:
@@ -242,32 +253,95 @@ class GeminiChat:
         else:
             await self.send(message, HELP)
 
+    async def invoke(self, interaction, action, value=''):
+        # Acknowledge before network or file I/O to avoid Unknown interaction (10062).
+        ephemeral = action != 'chat'
+        await interaction.response.defer(thinking=True, ephemeral=ephemeral)
+        if interaction.guild is None or interaction.channel is None:
+            await interaction.edit_original_response(content='このコマンドはサーバー内で使用してください。')
+            return
+        message = SimpleNamespace(
+            guild=interaction.guild, channel=interaction.channel, author=interaction.user,
+            interaction=interaction, sent=False, ephemeral=ephemeral)
+        try:
+            await self.command(message, action + (' ' + value if value else ''))
+        except AIError as exc:
+            await self.send(message, str(exc))
+        except discord.HTTPException:
+            log.warning('Could not send AI interaction response in channel %s', interaction.channel_id)
+        except Exception:
+            log.error('Unexpected AI interaction failure in channel %s', interaction.channel_id)
+            await self.send(message, 'AI機能でエラーが発生しました。設定ファイルとBotの動作状況を確認してください。')
+
     async def on_message(self, message):
-        if message.author.bot or message.webhook_id or not message.guild:
+        if message.author.bot or message.webhook_id or not message.guild or not self.bot.user:
             return
         content = message.content.strip()
-        prefix = re.match(r'^\./ai(?:\s+|$)', content, re.IGNORECASE)
-        mention = None
-        if self.bot.user:
-            mention = re.search(rf'<@!?{self.bot.user.id}>', content)
-        if not prefix and not mention:
+        if not re.search(rf'<@!?{self.bot.user.id}>', content):
             return
         try:
-            if prefix:
-                await self.command(message, content[prefix.end():])
-            else:
-                await self.chat(message, re.sub(rf'<@!?{self.bot.user.id}>', '', content).strip())
+            await self.chat(message, re.sub(rf'<@!?{self.bot.user.id}>', '', content).strip())
         except AIError as exc:
             await self.send(message, str(exc))
         except discord.HTTPException:
             log.warning('Could not send AI response in channel %s', message.channel.id)
         except Exception:
-            # Avoid logging raw API exceptions, which may include credentials or user text.
             log.error('Unexpected AI chat failure in channel %s', message.channel.id)
             await self.send(message, 'AI機能でエラーが発生しました。設定ファイルとBotの動作状況を確認してください。')
 
 
 def register_gemini(bot):
     service = GeminiChat(bot)
+    group = app_commands.Group(name='ai', description='Gemini AIに質問・設定', guild_only=True)
+
+    @group.command(name='chat', description='Gemini AIに質問します')
+    @app_commands.describe(question='AIに聞きたいこと')
+    async def ai_chat(interaction: discord.Interaction, question: str):
+        await service.invoke(interaction, 'chat', question)
+
+    @group.command(name='help', description='AI機能の使い方を表示します')
+    async def ai_help(interaction: discord.Interaction):
+        await service.invoke(interaction, 'help')
+
+    @group.command(name='settings', description='現在のAI設定を確認します')
+    async def ai_settings(interaction: discord.Interaction):
+        await service.invoke(interaction, 'settings')
+
+    @group.command(name='models', description='利用可能なモデル一覧を表示します（無料とは限りません）')
+    async def ai_models(interaction: discord.Interaction):
+        await service.invoke(interaction, 'models')
+
+    @group.command(name='model', description='AIモデルを変更します（サーバー管理者）')
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.describe(model='GeminiモデルID')
+    async def ai_model(interaction: discord.Interaction, model: str):
+        await service.invoke(interaction, 'model', model)
+
+    @group.command(name='prompt', description='AIのプロンプトを変更します（サーバー管理者）')
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.describe(text='指示文。reset と入力すると初期設定に戻ります')
+    async def ai_prompt(interaction: discord.Interaction, text: str):
+        await service.invoke(interaction, 'prompt', text)
+
+    @group.command(name='reasoning', description='思考レベルを変更します（サーバー管理者）')
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.describe(level='モデルが対応する思考レベルを選択')
+    @app_commands.choices(level=[
+        app_commands.Choice(name='auto（モデル標準）', value='auto'),
+        app_commands.Choice(name='off（対応モデルのみ）', value='off'),
+        app_commands.Choice(name='minimal', value='minimal'),
+        app_commands.Choice(name='low', value='low'),
+        app_commands.Choice(name='medium', value='medium'),
+        app_commands.Choice(name='high', value='high'),
+    ])
+    async def ai_reasoning(interaction: discord.Interaction, level: str):
+        await service.invoke(interaction, 'reasoning', level)
+
+    @group.command(name='reset', description='このチャンネルの会話履歴を削除します（サーバー管理者）')
+    @app_commands.default_permissions(manage_guild=True)
+    async def ai_reset(interaction: discord.Interaction):
+        await service.invoke(interaction, 'reset')
+
+    bot.tree.add_command(group)
     bot.add_listener(service.on_message, 'on_message')
     return service
