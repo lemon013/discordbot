@@ -704,5 +704,7 @@ from kakigoori import register_kakigoori
 register_kakigoori(bot)
 from gemini_chat import register_gemini
 register_gemini(bot)
+from leveling import register_leveling
+register_leveling(bot)
 
 bot.run(TOKEN)

@@ -10,3 +10,7 @@ __pycache__/
 github_bot_review.py
 Discord-GameBot/ai_settings.json
 Discord-GameBot/ai_settings.tmp
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
