@@ -20,6 +20,26 @@ def sample(score=42):
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_generic_world_murder_scores_include_zero_and_shared_wins(self):
+        from cloud_status import classify, find_status, render
+        registry = [{'worldName': 'World', 'scoreboard': board, 'gameKey': None}
+                    for board in ('wingame', 'Murder', 'Crew', 'Other')]
+        registry += [{'worldName': 'Unlimited Test', 'scoreboard': 'wingame', 'gameKey': 'unlimited'},
+                     {'worldName': 'Another World', 'scoreboard': 'wingame', 'gameKey': None}]
+        data = {REGISTRY: registry, SNAPSHOTS: {'World': {'scoreboards': {
+            board: {'updatedAt': 1000, 'players': {'alice': {'name': 'Alice', 'score': 0}}}
+            for board in ('wingame', 'Murder', 'Crew', 'Other')}}}}
+        decoded = decode_snapshot(encode_snapshot(data, SECRET), SECRET)
+        self.assertEqual(find_status(decoded, 'Alice', 'MurderMysteryRe:MASTER')[0],
+                         {'wingame': 0, 'Murder': 0, 'Crew': 0, 'Other': 0})
+        self.assertIn('**第三陣営になった数**: 0', render(decoded, 'MurderMysteryRe:MASTER', 'Alice'))
+        self.assertEqual(classify(registry[-2], registry), 'unlimited')
+        self.assertIsNone(classify(registry[-1], registry))
+        explicit = {'worldName': 'World', 'scoreboard': 'wingame', 'gameKey': 'unlimited'}
+        self.assertEqual(classify(explicit, registry), 'unlimited')
+        self.assertIsNone(classify({'worldName': 'World', 'scoreboard': 'Other'},
+                                   [{'worldName': 'World', 'scoreboard': 'Other'}]))
+
     def test_unlimited_scores_render_after_sync(self):
         from cloud_status import find_status, render
         world = 'Unlimited-test-world'
