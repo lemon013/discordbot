@@ -17,6 +17,9 @@ from discord.ext import tasks
 
 log = logging.getLogger(__name__)
 MAX_LEVEL = 100
+REGULAR_LEVEL = 30
+REGULAR_ROLE_ID = 1370764628354666688
+REGULAR_MESSAGE = '🎉常連ロールをゲットしました！おめでとうございます！'
 DEFAULTS = dict(enabled=1, text_xp_min=5, text_xp_max=15, cooldown=60, voice_xp=10,
                 base_xp=300, step_xp=50, notifications=1, notify_channel=None)
 
@@ -170,11 +173,50 @@ class Leveling:
         self.sessions = {}
         self.locks = {}
         self.connected = False
+        self.reward_lock = asyncio.Lock()
+        self.rewarded = set()
 
     def lock(self, guild_id):
         return self.locks.setdefault(guild_id, asyncio.Lock())
 
+    async def reward_roles(self, guild, results, cfg, fallback=None):
+        for result in results:
+            if not result or result['after'] < REGULAR_LEVEL:
+                continue
+            key = (guild.id, result['user_id'])
+            async with self.reward_lock:
+                if key in self.rewarded:
+                    continue
+                role = guild.get_role(REGULAR_ROLE_ID)
+                if role is None:
+                    continue  # The reward only belongs to the guild containing this role.
+                try:
+                    # Fetch current roles to avoid duplicates from a stale member cache.
+                    member = await guild.fetch_member(result['user_id'])
+                    if any(item.id == REGULAR_ROLE_ID for item in member.roles):
+                        self.rewarded.add(key)
+                        continue
+                    if not guild.me or not guild.me.guild_permissions.manage_roles or not role.is_assignable():
+                        log.warning('Cannot grant regular role: check Manage Roles and role hierarchy (guild %s)', guild.id)
+                        continue
+                    await member.add_roles(role, reason='Leveling reward: reached level 30', atomic=True)
+                except discord.HTTPException:
+                    log.warning('Could not grant regular role in guild %s to user %s', guild.id, result['user_id'])
+                    continue
+                self.rewarded.add(key)
+                channel = (guild.get_channel(cfg['notify_channel']) if cfg['notify_channel'] else None) or fallback
+                if channel is None:
+                    voice = getattr(member, 'voice', None)
+                    channel = getattr(voice, 'channel', None) or guild.system_channel
+                if channel is not None:
+                    try:
+                        await channel.send(f"<@{member.id}>\\n{REGULAR_MESSAGE}",
+                                           allowed_mentions=discord.AllowedMentions.none())
+                    except discord.HTTPException:
+                        log.warning('Regular role granted but celebration could not be sent in guild %s', guild.id)
+
     async def notify(self, guild, results, cfg, fallback=None):
+        await self.reward_roles(guild, results, cfg, fallback)
         if not cfg['notifications']:
             return
         channel = guild.get_channel(cfg['notify_channel']) if cfg['notify_channel'] else fallback

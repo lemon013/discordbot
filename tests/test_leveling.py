@@ -12,12 +12,21 @@ from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'Discord-GameBot'))
 import discord
 from discord.ext import commands
-from leveling import LevelStore, Leveling, eligible_voice, level_for, threshold, register_leveling
+from leveling import LevelStore, Leveling, eligible_voice, level_for, threshold, register_leveling, REGULAR_ROLE_ID, REGULAR_MESSAGE
 
 
 def human(user_id, bot=False, deaf=False, muted=False):
     return SimpleNamespace(id=user_id, bot=bot, voice=SimpleNamespace(deaf=False, self_deaf=deaf,
                            mute=False, self_mute=muted, suppress=False))
+
+def reward_guild():
+    channel = SimpleNamespace(send=AsyncMock())
+    role = SimpleNamespace(id=REGULAR_ROLE_ID, is_assignable=lambda: True)
+    member = SimpleNamespace(id=10, roles=[], add_roles=AsyncMock(), voice=SimpleNamespace(channel=channel))
+    guild = SimpleNamespace(id=1, get_role=lambda role_id: role if role_id == REGULAR_ROLE_ID else None,
+        get_channel=lambda _: channel, fetch_member=AsyncMock(return_value=member),
+        me=SimpleNamespace(guild_permissions=SimpleNamespace(manage_roles=True)), system_channel=channel)
+    return guild, member, role, channel
 
 
 class LevelStoreTests(unittest.TestCase):
@@ -230,6 +239,75 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('MAX Lv.100', next_field.value)
         self.assertNotIn('-', next_field.value)
         self.assertEqual(next(field for field in embed.fields if field.name == 'レベル').value, 'Lv.100')
+
+
+    async def test_regular_role_at_30_announces_success_once(self):
+        guild, member, role, channel = reward_guild()
+        cfg = {**self.store.config(1), 'notifications': 0}
+        await self.service.notify(guild, [{'user_id': 10, 'before': 29, 'after': 30}], cfg, channel)
+        member.add_roles.assert_awaited_once_with(role, reason='Leveling reward: reached level 30', atomic=True)
+        self.assertEqual(channel.send.call_args.args[0], '<@10>\\n' + REGULAR_MESSAGE)
+        self.assertFalse(channel.send.call_args.kwargs['allowed_mentions'].users)
+        await self.service.notify(guild, [{'user_id': 10, 'before': 30, 'after': 30}], cfg, channel)
+        self.assertEqual(member.add_roles.await_count, 1)
+        self.assertEqual(channel.send.await_count, 1)
+
+    async def test_regular_role_not_before_30_or_in_unrelated_guild(self):
+        guild, member, role, channel = reward_guild()
+        cfg = {**self.store.config(1), 'notifications': 0}
+        await self.service.notify(guild, [{'user_id': 10, 'before': 28, 'after': 29}], cfg, channel)
+        guild.fetch_member.assert_not_awaited()
+        guild.get_role = lambda _: None
+        await self.service.notify(guild, [{'user_id': 10, 'before': 29, 'after': 31}], cfg, channel)
+        member.add_roles.assert_not_awaited()
+        channel.send.assert_not_awaited()
+
+    async def test_existing_regular_role_is_not_reannounced_after_restart(self):
+        guild, member, role, channel = reward_guild()
+        member.roles = [role]
+        cfg = {**self.store.config(1), 'notifications': 0}
+        fresh = Leveling(self.bot, self.store)
+        await fresh.notify(guild, [{'user_id': 10, 'before': 35, 'after': 35}], cfg, channel)
+        member.add_roles.assert_not_awaited()
+        channel.send.assert_not_awaited()
+
+    async def test_regular_role_permission_failure_retries_without_false_success(self):
+        guild, member, role, channel = reward_guild()
+        cfg = {**self.store.config(1), 'notifications': 0}
+        guild.me.guild_permissions.manage_roles = False
+        result = [{'user_id': 10, 'before': 29, 'after': 30}]
+        await self.service.notify(guild, result, cfg, channel)
+        member.add_roles.assert_not_awaited()
+        channel.send.assert_not_awaited()
+        guild.me.guild_permissions.manage_roles = True
+        await self.service.notify(guild, result, cfg, channel)
+        member.add_roles.assert_awaited_once()
+        channel.send.assert_awaited_once()
+
+    async def test_regular_role_api_error_is_not_announced(self):
+        guild, member, role, channel = reward_guild()
+        cfg = {**self.store.config(1), 'notifications': 0}
+        member.add_roles.side_effect = discord.Forbidden(SimpleNamespace(status=403, reason='Forbidden'), 'denied')
+        result = [{'user_id': 10, 'before': 29, 'after': 30}]
+        await self.service.notify(guild, result, cfg, channel)
+        channel.send.assert_not_awaited()
+        self.assertNotIn((1, 10), self.service.rewarded)
+        member.add_roles.side_effect = None
+        await self.service.notify(guild, result, cfg, channel)
+        channel.send.assert_awaited_once()
+
+    async def test_regular_role_voice_backfill_and_hierarchy(self):
+        guild, member, role, channel = reward_guild()
+        cfg = {**self.store.config(1), 'notifications': 0}
+        role.is_assignable = lambda: False
+        result = [{'user_id': 10, 'before': 40, 'after': 40}]
+        await self.service.notify(guild, result, cfg)
+        member.add_roles.assert_not_awaited()
+        role.is_assignable = lambda: True
+        await self.service.notify(guild, result, cfg)
+        member.add_roles.assert_awaited_once()
+        channel.send.assert_awaited_once()
+        self.assertIn(REGULAR_MESSAGE, channel.send.call_args.args[0])
 
 
 if __name__ == '__main__':
