@@ -1,7 +1,9 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from pathlib import Path
 import sys
+import sqlite3
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -23,14 +25,17 @@ class LevelStoreTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.store = LevelStore(Path(self.temp.name) / 'levels.sqlite3')
+        self.random_patch = patch('leveling.random.randint', side_effect=lambda low, high: high)
+        self.random_patch.start()
+        self.addCleanup(self.random_patch.stop)
 
     def test_level_threshold_boundaries_and_large_values(self):
         for base, step in ((300, 50), (100, 0), (1, 1000000)):
             for level in (0, 1, 2, 10, 1000, 1000000):
                 xp = threshold(level, base, step)
-                self.assertEqual(level_for(xp, base, step), level)
+                self.assertEqual(level_for(xp, base, step), min(level, 100))
                 if level:
-                    self.assertEqual(level_for(xp - 1, base, step), level - 1)
+                    self.assertEqual(level_for(xp - 1, base, step), min(level - 1, 100))
         self.assertEqual(threshold(1), 300)
         self.assertEqual(threshold(2), 650)
 
@@ -52,13 +57,13 @@ class LevelStoreTests(unittest.TestCase):
         self.assertEqual((row['xp'], row['text_xp'], row['voice_xp']), (45, 15, 30))
 
     def test_disabled_rates_settings_and_multi_level_award(self):
-        self.store.configure(1, {'text_xp': 1000})
+        self.store.configure(1, {'text_xp_min': 1000, 'text_xp_max': 1000})
         result, _ = self.store.award_text(1, 10, 100)
         self.assertEqual((result['before'], result['after']), (0, 2))
         self.store.configure(1, {'enabled': 0})
         self.assertIsNone(self.store.award_text(1, 10, 200)[0])
         self.assertEqual(self.store.award_voice(1, [(10, 10)])[0], [])
-        self.store.configure(1, {'enabled': 1, 'text_xp': 0, 'voice_xp': 0})
+        self.store.configure(1, {'enabled': 1, 'text_xp_min': 0, 'text_xp_max': 0, 'voice_xp': 0})
         self.assertIsNone(self.store.award_text(1, 10, 300)[0])
         for changes in ({'unknown': 1}, {'cooldown': 0}, {'base_xp': 0}, {'step_xp': -1}):
             with self.assertRaises(ValueError):
@@ -73,12 +78,59 @@ class LevelStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.rank(1, 100)[0]['rank'])
         self.assertEqual(LevelStore(self.store.path).rank(1, 12)[0]['xp'], 10)
 
+    def test_random_text_range_includes_both_endpoints(self):
+        self.assertEqual((self.store.config(1)['text_xp_min'], self.store.config(1)['text_xp_max']), (5, 15))
+        with patch('leveling.random.randint', side_effect=[5, 15]) as random_xp:
+            self.assertEqual(self.store.award_text(1, 10, 100)[0]['xp'], 5)
+            self.assertEqual(self.store.award_text(1, 10, 160)[0]['xp'], 20)
+            self.assertEqual(random_xp.call_args_list[0].args, (5, 15))
+        with self.assertRaises(ValueError):
+            self.store.configure(1, {'text_xp_min': 16})
+        self.assertEqual(self.store.config(1)['text_xp_min'], 5)
+
+    def test_upgrade_old_database_preserves_xp_and_disabled_text(self):
+        old_path = Path(self.temp.name) / 'old.sqlite3'
+        with closing(sqlite3.connect(old_path)) as db, db:
+            db.executescript('''
+                CREATE TABLE level_config (
+                    guild_id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1,
+                    text_xp INTEGER NOT NULL DEFAULT 15, cooldown INTEGER NOT NULL DEFAULT 60,
+                    voice_xp INTEGER NOT NULL DEFAULT 10, base_xp INTEGER NOT NULL DEFAULT 300,
+                    step_xp INTEGER NOT NULL DEFAULT 50, notifications INTEGER NOT NULL DEFAULT 1,
+                    notify_channel INTEGER);
+                INSERT INTO level_config(guild_id,text_xp) VALUES(1,15),(2,0);
+                CREATE TABLE level_users (
+                    guild_id INTEGER NOT NULL,user_id INTEGER NOT NULL,xp INTEGER NOT NULL DEFAULT 0,
+                    text_xp INTEGER NOT NULL DEFAULT 0,voice_xp INTEGER NOT NULL DEFAULT 0,
+                    last_text REAL,PRIMARY KEY(guild_id,user_id));
+                INSERT INTO level_users(guild_id,user_id,xp,text_xp) VALUES(1,10,250,250);
+            ''')
+        upgraded = LevelStore(old_path)
+        self.assertEqual(upgraded.rank(1, 10)[0]['xp'], 250)
+        self.assertEqual(upgraded.config(1)['text_xp_min'], 5)
+        self.assertEqual(upgraded.config(2)['text_xp_max'], 0)
+        upgraded.configure(2, {'text_xp_min': 5, 'text_xp_max': 15})
+        reopened = LevelStore(old_path)
+        self.assertEqual(reopened.config(2)['text_xp_max'], 15)
+        self.assertEqual(reopened.rank(1, 10)[0]['xp'], 250)
+
+    def test_level_100_caps_both_sources_but_retains_total_xp(self):
+        self.store.award_voice(1, [(10, 30000)])
+        result, _ = self.store.award_text(1, 10, 100)
+        self.assertEqual((result['before'], result['after']), (100, 100))
+        self.assertEqual(self.store.rank(1, 10)[0]['xp'], 300015)
+        self.assertEqual(level_for(10**30), 100)
+        self.assertEqual(level_for(10**30, step=0), 100)
+
 
 class VoiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.store = LevelStore(Path(self.temp.name) / 'levels.sqlite3')
+        self.random_patch = patch('leveling.random.randint', side_effect=lambda low, high: high)
+        self.random_patch.start()
+        self.addCleanup(self.random_patch.stop)
         self.channel = SimpleNamespace(members=[human(10), human(20, muted=True)])
         self.guild = SimpleNamespace(id=1, voice_channels=[self.channel], afk_channel=None, get_channel=lambda _: None)
         self.bot = SimpleNamespace(is_ready=lambda: True, guilds=[self.guild])
@@ -122,7 +174,7 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         guild = SimpleNamespace(id=1, get_channel=lambda _: channel)
         msg = SimpleNamespace(guild=guild, author=human(10), webhook_id=None,
                               content='hello', attachments=[], channel=channel)
-        self.store.configure(1, {'text_xp': 300})
+        self.store.configure(1, {'text_xp_min': 300, 'text_xp_max': 300})
         await self.service.on_message(msg)
         self.assertEqual(self.store.rank(1, 10)[0]['xp'], 300)
         channel.send.assert_awaited_once()
@@ -150,8 +202,8 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_configuration_permissions_and_registration(self):
         interaction = SimpleNamespace(guild_id=1, user=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=False)),
             response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock())
-        await self.service.configure(interaction, {'text_xp': 999})
-        self.assertEqual(self.store.config(1)['text_xp'], 15)
+        await self.service.configure(interaction, {'text_xp_min': 999, 'text_xp_max': 999})
+        self.assertEqual(self.store.config(1)['text_xp_max'], 15)
         bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
         with patch('leveling.LevelStore', return_value=self.store):
             register_leveling(bot)
@@ -167,6 +219,17 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         self.channel.members = [human(10), human(20)]
         self.guild.afk_channel = self.channel
         self.assertEqual(eligible_voice(self.guild), set())
+
+    async def test_max_level_rank_has_no_next_level_or_negative_xp(self):
+        self.store.award_voice(1, [(10, 30000)])
+        interaction = SimpleNamespace(guild_id=1, user=SimpleNamespace(id=10, display_name='Player'),
+            response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock())
+        await self.service.rank(interaction)
+        embed = interaction.edit_original_response.call_args.kwargs['embed']
+        next_field = next(field for field in embed.fields if field.name == '次のレベルまで')
+        self.assertIn('MAX Lv.100', next_field.value)
+        self.assertNotIn('-', next_field.value)
+        self.assertEqual(next(field for field in embed.fields if field.name == 'レベル').value, 'Lv.100')
 
 
 if __name__ == '__main__':

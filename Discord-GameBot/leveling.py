@@ -6,6 +6,7 @@ from contextlib import closing
 from math import isqrt
 import logging
 import os
+import random
 from pathlib import Path
 import sqlite3
 import time
@@ -15,7 +16,8 @@ from discord import app_commands
 from discord.ext import tasks
 
 log = logging.getLogger(__name__)
-DEFAULTS = dict(enabled=1, text_xp=15, cooldown=60, voice_xp=10,
+MAX_LEVEL = 100
+DEFAULTS = dict(enabled=1, text_xp_min=5, text_xp_max=15, cooldown=60, voice_xp=10,
                 base_xp=300, step_xp=50, notifications=1, notify_channel=None)
 
 
@@ -25,9 +27,9 @@ def threshold(level, base=300, step=50):
 
 def level_for(xp, base=300, step=50):
     if step == 0:
-        return xp // base
+        return min(MAX_LEVEL, xp // base)
     b = 2 * base - step
-    return (isqrt(b * b + 8 * step * xp) - b) // (2 * step)
+    return min(MAX_LEVEL, (isqrt(b * b + 8 * step * xp) - b) // (2 * step))
 
 
 class LevelStore:
@@ -39,7 +41,9 @@ class LevelStore:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS level_config (
                     guild_id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1,
-                    text_xp INTEGER NOT NULL DEFAULT 15, cooldown INTEGER NOT NULL DEFAULT 60,
+                    text_xp INTEGER NOT NULL DEFAULT 15,
+                    text_xp_min INTEGER NOT NULL DEFAULT 5, text_xp_max INTEGER NOT NULL DEFAULT 15,
+                    cooldown INTEGER NOT NULL DEFAULT 60,
                     voice_xp INTEGER NOT NULL DEFAULT 10, base_xp INTEGER NOT NULL DEFAULT 300,
                     step_xp INTEGER NOT NULL DEFAULT 50, notifications INTEGER NOT NULL DEFAULT 1,
                     notify_channel INTEGER);
@@ -50,6 +54,16 @@ class LevelStore:
                     last_text REAL, PRIMARY KEY(guild_id, user_id));
                 CREATE INDEX IF NOT EXISTS level_ranking ON level_users(guild_id, xp DESC, user_id);
             ''')
+
+            # Existing installations keep all XP and receive the new random range.
+            columns = {row['name'] for row in db.execute('PRAGMA table_info(level_config)')}
+            migrated = False
+            for name, default in (('text_xp_min', 5), ('text_xp_max', 15)):
+                if name not in columns:
+                    db.execute(f'ALTER TABLE level_config ADD COLUMN {name} INTEGER NOT NULL DEFAULT {default}')
+                    migrated = True
+            if migrated:
+                db.execute('UPDATE level_config SET text_xp_min=0,text_xp_max=0 WHERE text_xp=0')
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=10)
@@ -66,7 +80,7 @@ class LevelStore:
             return self.config_in(db, guild_id)
 
     def configure(self, guild_id, changes):
-        limits = dict(text_xp=(0, 10000), voice_xp=(0, 10000), cooldown=(5, 86400),
+        limits = dict(text_xp_min=(0, 10000), text_xp_max=(0, 10000), voice_xp=(0, 10000), cooldown=(5, 86400),
                       base_xp=(1, 1000000), step_xp=(0, 1000000), enabled=(0, 1), notifications=(0, 1))
         for key, value in changes.items():
             if key == 'notify_channel':
@@ -76,6 +90,9 @@ class LevelStore:
                 raise ValueError('Invalid leveling setting')
         with closing(self.connect()) as db, db:
             db.execute('BEGIN IMMEDIATE')
+            candidate = {**self.config_in(db, guild_id), **changes}
+            if candidate['text_xp_min'] > candidate['text_xp_max']:
+                raise ValueError('Minimum text XP must not exceed maximum text XP')
             db.execute('INSERT OR IGNORE INTO level_config(guild_id) VALUES(?)', (guild_id,))
             for key, value in changes.items():
                 db.execute(f'UPDATE level_config SET {key}=? WHERE guild_id=?', (value, guild_id))
@@ -101,9 +118,10 @@ class LevelStore:
         with closing(self.connect()) as db, db:
             db.execute('BEGIN IMMEDIATE')
             cfg = self.config_in(db, guild_id)
-            if not cfg['enabled'] or not cfg['text_xp']:
+            if not cfg['enabled'] or not cfg['text_xp_max']:
                 return None, cfg
-            return self.add_in(db, guild_id, user_id, cfg['text_xp'], 'text_xp', cfg, now), cfg
+            amount = random.randint(cfg['text_xp_min'], cfg['text_xp_max'])
+            return self.add_in(db, guild_id, user_id, amount, 'text_xp', cfg, now), cfg
 
     def award_voice(self, guild_id, minutes):
         with closing(self.connect()) as db, db:
@@ -257,7 +275,10 @@ class Leveling:
         embed.add_field(name='レベル', value=f'Lv.{level}')
         embed.add_field(name='順位', value=f"{user['rank']}位" if user['rank'] else '未参加')
         embed.add_field(name='累計XP', value=f"{user['xp']:,} XP")
-        embed.add_field(name='次のレベルまで', value=f"{next_xp - user['xp']:,} XP（{user['xp'] - start:,} / {next_xp - start:,}）", inline=False)
+        if level == MAX_LEVEL:
+            embed.add_field(name='次のレベルまで', value=f'最大レベルに到達しました（MAX Lv.{MAX_LEVEL}）', inline=False)
+        else:
+            embed.add_field(name='次のレベルまで', value=f"{next_xp - user['xp']:,} XP（{user['xp'] - start:,} / {next_xp - start:,}）", inline=False)
         embed.add_field(name='獲得内訳', value=f"テキスト：{user['text_xp']:,} XP\nVC：{user['voice_xp']:,} XP", inline=False)
         await interaction.edit_original_response(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
@@ -278,14 +299,19 @@ class Leveling:
             return
         async with self.lock(interaction.guild_id):
             if changes:
-                cfg = await asyncio.to_thread(self.store.configure, interaction.guild_id, changes)
+                try:
+                    cfg = await asyncio.to_thread(self.store.configure, interaction.guild_id, changes)
+                except ValueError:
+                    await interaction.edit_original_response(content='設定が無効です。テキストXPの最小値は最大値以下にしてください。')
+                    return
                 # Prevent partial VC minutes from crossing a configuration change.
                 self.sessions = {k: v for k, v in self.sessions.items() if k[0] != interaction.guild_id}
             else:
                 cfg = await asyncio.to_thread(self.store.config, interaction.guild_id)
         channel = f"<#{cfg['notify_channel']}>" if cfg['notify_channel'] else 'テキストは発言先、VCは通知なし'
         text = (f"レベリング：{'有効' if cfg['enabled'] else '無効'}\n"
-                f"テキスト：{cfg['text_xp']} XP / {cfg['cooldown']}秒に1回\nVC：{cfg['voice_xp']} XP / 1分\n"
+                f"テキスト：{cfg['text_xp_min']}〜{cfg['text_xp_max']} XP（ランダム）/ {cfg['cooldown']}秒に1回\nVC：{cfg['voice_xp']} XP / 1分\n"
+                f"最大レベル：{MAX_LEVEL}\n"
                 f"次レベルの必要XP：{cfg['base_xp']} + 現在レベル × {cfg['step_xp']}\n"
                 f"レベルアップ通知：{'有効' if cfg['notifications'] else '無効'}\n通知先：{channel}\n"
                 '必要XPの設定を変えると、保存済みの累計XPからレベルを再計算します。')
@@ -314,17 +340,18 @@ def register_leveling(bot):
         await service.configure(interaction)
 
     @group.command(name='configure', description='獲得XP・必要XP・有効無効を変更します')
-    @app_commands.describe(text_xp='1発言のXP（0で無効）', voice_xp='VC1分のXP（0で無効）',
+    @app_commands.describe(text_xp_min='1発言の最小XP（既定5）', text_xp_max='1発言の最大XP（既定15。両方0で無効）', voice_xp='VC1分のXP（0で無効）',
                            cooldown='テキストXPを付与する間隔（秒）', base_xp='最初のレベルアップに必要なXP',
                            step_xp='レベルごとに追加で必要なXP', enabled='レベリング全体の有効無効', notifications='レベルアップ通知')
     async def configure(interaction: discord.Interaction,
-                        text_xp: app_commands.Range[int, 0, 10000] | None = None,
+                        text_xp_min: app_commands.Range[int, 0, 10000] | None = None,
+                        text_xp_max: app_commands.Range[int, 0, 10000] | None = None,
                         voice_xp: app_commands.Range[int, 0, 10000] | None = None,
                         cooldown: app_commands.Range[int, 5, 86400] | None = None,
                         base_xp: app_commands.Range[int, 1, 1000000] | None = None,
                         step_xp: app_commands.Range[int, 0, 1000000] | None = None,
                         enabled: bool | None = None, notifications: bool | None = None):
-        changes = {k: int(v) for k, v in dict(text_xp=text_xp, voice_xp=voice_xp, cooldown=cooldown,
+        changes = {k: int(v) for k, v in dict(text_xp_min=text_xp_min, text_xp_max=text_xp_max, voice_xp=voice_xp, cooldown=cooldown,
                    base_xp=base_xp, step_xp=step_xp, enabled=enabled, notifications=notifications).items() if v is not None}
         await service.configure(interaction, changes)
 
