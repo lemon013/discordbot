@@ -24,6 +24,19 @@ log = logging.getLogger(__name__)
 CATALOG = json.loads(Path(__file__).with_name('shop_catalog.json').read_text(encoding='utf-8'))
 ITEMS = {item['id']: item for item in CATALOG}
 ATTACHMENT_NAME = 'shop-entitlements.json'
+PAGE_SIZE = 10
+CATEGORIES = {
+    'xp': ('経験値アップ', '✨', 'Discordの経験値を増やします。'),
+    'record': ('レコード', '🎵', 'Minecraft参加時に効果音を流します。'),
+    'welcome': ('ようこそメッセージ', '💬', 'Minecraft参加時に歓迎文を流します。'),
+}
+
+
+def category_page(category, page=0):
+    items = [item for item in CATALOG if item['kind'] == category]
+    pages = max(1, (len(items) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    return items[page * PAGE_SIZE:(page + 1) * PAGE_SIZE], page, pages
 
 
 class ShopError(Exception):
@@ -150,17 +163,29 @@ class ShopService:
         if not self.sync_tick.is_running():
             self.sync_tick.start()
 
-    async def show(self, interaction, *, replace=False):
-        await interaction.response.defer(ephemeral=True, thinking=True)
+    async def show(self, interaction, *, category=None, page=0, replace=False):
+        await interaction.response.defer(ephemeral=True, thinking=not replace)
+        category = category if category in CATEGORIES else None
+        _, page, _ = category_page(category, page)
         profile = await asyncio.to_thread(self.store.profile, interaction.guild_id, interaction.user.id)
-        view = ShopView(self, interaction.user.id, profile)
-        await interaction.edit_original_response(content=None, embed=self.board(profile), view=view,
+        view = ShopView(self, interaction.user.id, profile, category=category, page=page)
+        await interaction.edit_original_response(content=None, embed=self.board(profile, category, page), view=view,
                                                  allowed_mentions=discord.AllowedMentions.none())
 
     @staticmethod
-    def board(profile):
-        embed = discord.Embed(title='🛒 ジュエルショップ', description=f"残高：**💎 {profile['balance']:,} ジュエル**\n商品を1つ選んで内容を確認してください。", color=discord.Color.blue())
-        for item in CATALOG:
+    def board(profile, category=None, page=0):
+        if category not in CATEGORIES:
+            embed = discord.Embed(title='🛒 ジュエルショップ', description=f"残高：**💎 {profile['balance']:,} ジュエル**\\nまずカテゴリを1つ選んでください。", color=discord.Color.blue())
+            for kind, (name, emoji, description) in CATEGORIES.items():
+                items = [item for item in CATALOG if item['kind'] == kind]
+                embed.add_field(name=f"{emoji} {name}（{len(items)}種類）", value=description, inline=False)
+            embed.set_footer(text='カテゴリ → 商品 → 内容確認 → 購入。購入済みの音・歓迎文は無料で装備できます。')
+            return embed
+        items, page, pages = category_page(category, page)
+        name, emoji, _ = CATEGORIES[category]
+        embed = discord.Embed(title=f'{emoji} {name} — {page + 1}/{pages}ページ',
+            description=f"残高：**💎 {profile['balance']:,} ジュエル**\\n商品を1つ選んで内容を確認してください。", color=discord.Color.blue())
+        for item in items:
             owned = item['id'] in profile['owned']
             equipped = item['id'] in profile['active'].values()
             suffix = '【装備中】' if equipped else '【購入済み・装備無料】' if owned else ''
@@ -168,7 +193,7 @@ class ShopService:
         embed.set_footer(text='音・歓迎文は各1つ装備。Minecraft反映にはPCブリッジとPC Botでの/linkが必要です。')
         return embed
 
-    async def purchase(self, interaction, item_id):
+    async def purchase(self, interaction, item_id, *, page=0):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             result = await asyncio.to_thread(self.store.buy, interaction.guild_id, interaction.user.id, str(interaction.id), item_id)
@@ -178,7 +203,7 @@ class ShopService:
         item = ITEMS[item_id]
         message = f"✅ {item['name']}を{'装備' if result['equipped'] else '購入'}しました！\n支払い：💎 {result['price']:,} / 残高：💎 {result['balance']:,}"
         profile = await asyncio.to_thread(self.store.profile, interaction.guild_id, interaction.user.id)
-        await interaction.edit_original_response(content=message, embed=self.board(profile), view=ShopView(self, interaction.user.id, profile),
+        await interaction.edit_original_response(content=message, embed=self.board(profile, item['kind'], page), view=ShopView(self, interaction.user.id, profile, category=item['kind'], page=page),
                                                  allowed_mentions=discord.AllowedMentions.none())
         if item['kind'] == 'xp':
             leveling = getattr(self.bot, 'leveling_service', None)
@@ -216,13 +241,24 @@ class OwnedView(discord.ui.View):
 
 
 class ShopView(OwnedView):
-    def __init__(self, service, owner, profile):
+    def __init__(self, service, owner, profile, *, category=None, page=0):
         super().__init__(service, owner)
-        select = discord.ui.Select(placeholder='商品を1つ選択', min_values=1, max_values=1,
+        self.category = category if category in CATEGORIES else None
+        items, self.page, self.pages = category_page(self.category, page)
+        category_select = discord.ui.Select(placeholder='カテゴリを選択', min_values=1, max_values=1, row=0,
+            options=[discord.SelectOption(label=name, value=kind, emoji=emoji, default=kind == self.category)
+                     for kind, (name, emoji, _) in CATEGORIES.items()])
+        async def choose_category(interaction):
+            await service.show(interaction, category=category_select.values[0], replace=True)
+        category_select.callback = choose_category
+        self.add_item(category_select)
+        if self.category is None:
+            return
+        select = discord.ui.Select(placeholder='商品を1つ選択', min_values=1, max_values=1, row=1,
             options=[discord.SelectOption(label=item['name'], value=item['id'],
-                description='購入済み：無料で装備' if item['id'] in profile['owned'] else f"💎 {item['price']:,} ジュエル") for item in CATALOG])
+                description='購入済み：無料で装備' if item['id'] in profile['owned'] else f"💎 {item['price']:,} ジュエル") for item in items])
         async def choose(interaction):
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            await interaction.response.defer(ephemeral=True, thinking=False)
             item = ITEMS[select.values[0]]
             current = await asyncio.to_thread(service.store.profile, interaction.guild_id, interaction.user.id)
             owned = item['id'] in current['owned']
@@ -230,28 +266,45 @@ class ShopView(OwnedView):
             embed.add_field(name='価格', value='購入済み：装備無料' if owned else f"💎 {item['price']:,} ジュエル")
             if item.get('sound'):
                 embed.add_field(name='効果音', value=f"`{item['sound']}`")
-            await interaction.edit_original_response(embed=embed, view=ConfirmView(service, owner, item['id'], owned))
+            await interaction.edit_original_response(content=None, embed=embed,
+                view=ConfirmView(service, owner, item['id'], owned, page=self.page))
         select.callback = choose
         self.add_item(select)
+        if self.pages > 1:
+            previous = discord.ui.Button(label='前のページ', style=discord.ButtonStyle.secondary, row=2, disabled=self.page == 0)
+            following = discord.ui.Button(label='次のページ', style=discord.ButtonStyle.secondary, row=2, disabled=self.page == self.pages - 1)
+            async def go_previous(interaction):
+                await service.show(interaction, category=self.category, page=self.page - 1, replace=True)
+            async def go_next(interaction):
+                await service.show(interaction, category=self.category, page=self.page + 1, replace=True)
+            previous.callback, following.callback = go_previous, go_next
+            self.add_item(previous)
+            self.add_item(following)
+        home = discord.ui.Button(label='カテゴリ選択に戻る', style=discord.ButtonStyle.secondary, row=2)
+        async def go_home(interaction):
+            await service.show(interaction, replace=True)
+        home.callback = go_home
+        self.add_item(home)
 
 
 class ConfirmView(OwnedView):
-    def __init__(self, service, owner, item_id, owned):
+    def __init__(self, service, owner, item_id, owned, *, page=0):
         super().__init__(service, owner)
         self.used = False
+        self.category, self.page = ITEMS[item_id]['kind'], page
         button = discord.ui.Button(label='装備する（無料）' if owned else '購入する', style=discord.ButtonStyle.success)
         async def purchase(interaction):
             if self.used:
                 await interaction.response.send_message('この購入操作は処理済みです。商品一覧から選び直してください。', ephemeral=True)
                 return
             self.used = True
-            await service.purchase(interaction, item_id)
+            await service.purchase(interaction, item_id, page=self.page)
         button.callback = purchase
         self.add_item(button)
 
     @discord.ui.button(label='商品一覧に戻る', style=discord.ButtonStyle.secondary)
     async def back(self, interaction, button):
-        await self.service.show(interaction)
+        await self.service.show(interaction, category=self.category, page=self.page, replace=True)
 
 
 def register_shop(bot):

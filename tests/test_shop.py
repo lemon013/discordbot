@@ -20,7 +20,7 @@ import discord
 from discord.ext import commands
 from casino import CasinoStore
 from leveling import LevelStore, threshold
-from shop import ShopStore, ShopError, ShopService, ShopView, ConfirmView, ITEMS, signed_snapshot, register_shop
+from shop import ShopStore, ShopError, ShopService, ShopView, ConfirmView, ITEMS, CATEGORIES, PAGE_SIZE, category_page, signed_snapshot, register_shop
 
 
 class ShopStoreTests(unittest.TestCase):
@@ -132,8 +132,8 @@ class ShopUITests(unittest.IsolatedAsyncioTestCase):
         profile = self.store.profile(1, 10)
         view = ShopView(self.service, 10, profile)
         self.assertEqual((view.children[0].min_values, view.children[0].max_values), (1, 1))
-        self.assertEqual(len(view.children[0].options), len(ITEMS))
-        self.assertEqual(len(self.service.board(profile).fields), len(ITEMS))
+        self.assertEqual(len(view.children[0].options), 3)
+        self.assertEqual(len(self.service.board(profile).fields), 3)
         interaction = SimpleNamespace(user=SimpleNamespace(id=20), guild=SimpleNamespace(id=1), response=SimpleNamespace(send_message=AsyncMock()))
         self.assertFalse(await view.interaction_check(interaction))
         interaction.user.id = 10
@@ -147,7 +147,7 @@ class ShopUITests(unittest.IsolatedAsyncioTestCase):
         interaction = SimpleNamespace(response=SimpleNamespace(send_message=AsyncMock()))
         await button.callback(interaction)
         await button.callback(interaction)
-        self.service.purchase.assert_awaited_once_with(interaction, 'xp5')
+        self.service.purchase.assert_awaited_once_with(interaction, 'xp5', page=0)
         view.stop()
 
     async def test_shop_command_registration(self):
@@ -182,6 +182,61 @@ class ShopUITests(unittest.IsolatedAsyncioTestCase):
             self.service.sent[1] = (digest, stamp - 601)
             self.assertTrue(await self.service.sync(1))
             self.assertEqual(channel.send.await_count, 2)
+
+
+    async def test_each_category_is_paged_without_missing_or_mixing_products(self):
+        profile = self.store.profile(1, 10)
+        self.assertEqual(set(CATEGORIES), {'xp', 'record', 'welcome'})
+        for category in CATEGORIES:
+            collected = []
+            _, _, pages = category_page(category)
+            for page in range(pages):
+                view = ShopView(self.service, 10, profile, category=category, page=page)
+                selector = next(child for child in view.children if isinstance(child, discord.ui.Select) and child.row == 1)
+                ids = [option.value for option in selector.options]
+                self.assertLessEqual(len(ids), PAGE_SIZE)
+                self.assertTrue(all(ITEMS[item_id]['kind'] == category for item_id in ids))
+                self.assertEqual(len(self.service.board(profile, category, page).fields), len(ids))
+                collected.extend(ids)
+                view.stop()
+            self.assertEqual(set(collected), {item_id for item_id, item in ITEMS.items() if item['kind'] == category})
+            self.assertEqual(len(collected), len(set(collected)))
+        self.assertEqual(category_page('record', 999)[1], 1)
+        self.assertEqual(category_page('record', -1)[1], 0)
+
+    async def test_navigation_and_confirmation_return_preserve_category_page(self):
+        profile = self.store.profile(1, 10)
+        self.service.show = AsyncMock()
+        view = ShopView(self.service, 10, profile, category='record', page=0)
+        next_button = next(child for child in view.children if getattr(child, 'label', '') == '次のページ')
+        self.assertTrue(next(child for child in view.children if getattr(child, 'label', '') == '前のページ').disabled)
+        await next_button.callback('interaction')
+        self.service.show.assert_awaited_once_with('interaction', category='record', page=1, replace=True)
+        self.service.show.reset_mock()
+        confirm = ConfirmView(self.service, 10, category_page('record', 1)[0][0]['id'], False, page=1)
+        await confirm.back.callback('interaction')
+        self.service.show.assert_awaited_once_with('interaction', category='record', page=1, replace=True)
+        view.stop()
+        confirm.stop()
+
+    async def test_page_changes_edit_existing_board_and_do_not_spend(self):
+        interaction = SimpleNamespace(guild_id=1, user=SimpleNamespace(id=10),
+            response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock())
+        await self.service.show(interaction, category='record', page=1, replace=True)
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=False)
+        view = interaction.edit_original_response.call_args.kwargs['view']
+        self.assertEqual((view.category, view.page), ('record', 1))
+        self.assertEqual(self.store.casino.balance(1, 10), 0)
+        self.assertEqual(self.store.casino.history(1, 10), [])
+        view.stop()
+
+    async def test_original_products_and_new_catalog_survive_upgrade(self):
+        self.assertEqual(ITEMS['xp5']['price'], 1000)
+        self.assertEqual(ITEMS['record_camera']['sound'], 'random.screenshot')
+        self.assertEqual(ITEMS['welcome_wild']['text'], 'あ！野生の<プレイヤーネーム>だ！')
+        self.assertEqual(len([item for item in ITEMS.values() if item['kind'] == 'record']), 15)
+        self.assertEqual(len([item for item in ITEMS.values() if item['kind'] == 'welcome']), 13)
+        self.assertTrue(all('<プレイヤーネーム>' in item['text'] for item in ITEMS.values() if item['kind'] == 'welcome'))
 
 
 if __name__ == '__main__':
