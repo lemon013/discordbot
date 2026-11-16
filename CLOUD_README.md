@@ -47,3 +47,11 @@ XPは既定で `Discord-GameBot/levels.sqlite3` に保存します。再デプ�
 詳しい配当とコマンドは [CASINO_README.md](Discord-GameBot/CASINO_README.md) を参照してください。
 
 `/gift member:相手 amount:数` でジュエルを送れます。初期残高0は新規ユーザーに適用され、既存残高は維持します。
+
+## ジュエルショップ /shop
+
+`/shop` で埋め込みの商品一覧から1つ選び、購入または装備できます。1,000ジュエルで5XP、2,000ジュエル〜で参加音、3,000ジュエル〜で歓迎メッセージを購入できます。
+
+XP購入はMWS側の更新で利用できます。Minecraftの参加演出にはPC側のブリッジと `shop_catalog.json` も更新し、既存の成績同期用 `MC_SYNC_CHANNEL_ID`・`MC_SYNC_SECRET` をMWS・PCで一致させてください。演出の持ち主はPC Botのアカウント連携で判定します。
+
+更新対象・商品・同期の詳しい手順は [SHOP_README.md](Discord-GameBot/SHOP_README.md) を参照してください。

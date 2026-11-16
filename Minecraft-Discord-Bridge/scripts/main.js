@@ -3,6 +3,7 @@ import { setupLinkChat, handleLinkInteraction, getMcidByDiscordId, linkCommandDa
 import { setupPlayerStatusChat, startPlayerStatusPolling, handlePlayerStatusInteraction, playerCommandData } from './playerStatus.js';
 import { handleDeleteInteraction, deleteCommandData } from './delete.js';
 import { isAcknowledgementError } from './interaction.js';
+import { setupShopEffects } from './shopEffects.js';
 
 const CHAT_INPUT_TYPE = 1;
 
@@ -73,6 +74,7 @@ async function syncGuildCommand(app, commandData) {
  * @param {import('@discord-mcbe/server').Application} app
  */
 export default async function main(app) {
+  setupShopEffects(app);
   app.logger.info('[Custom] /link, /player status, /delete を読み込み中...');
 
   // Minecraft側の !link、保存設定コマンド、ステータススナップショットを起動。

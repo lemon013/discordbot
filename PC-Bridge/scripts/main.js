@@ -1,4 +1,5 @@
 import { setupPCLink } from './linkSetup.js';
+import { setupShopEffects } from '../../Minecraft-Discord-Bridge/scripts/shopEffects.js';
 
 const REGISTRY = 'custom_player_status:saved_scoreboards';
 const SNAPSHOTS = 'custom_player_status:snapshots';
@@ -17,6 +18,7 @@ function classify(world, board, registry) {
 }
 
 export default async function main(app) {
+  setupShopEffects(app);
   const registry = () => app.properties.get(REGISTRY) ?? [];
   app.before('minecraftMessage', event => {
     const message = event.message.trim();

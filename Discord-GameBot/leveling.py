@@ -58,6 +58,9 @@ class LevelStore:
                 CREATE INDEX IF NOT EXISTS level_ranking ON level_users(guild_id, xp DESC, user_id);
             ''')
 
+            user_columns = {row['name'] for row in db.execute('PRAGMA table_info(level_users)')}
+            if 'shop_xp' not in user_columns:
+                db.execute('ALTER TABLE level_users ADD COLUMN shop_xp INTEGER NOT NULL DEFAULT 0')
             # Existing installations keep all XP and receive the new random range.
             columns = {row['name'] for row in db.execute('PRAGMA table_info(level_config)')}
             migrated = False
@@ -168,7 +171,7 @@ class LevelStore:
         with closing(self.connect()) as db:
             cfg = self.config_in(db, guild_id)
             row = db.execute('SELECT * FROM level_users WHERE guild_id=? AND user_id=?', (guild_id, user_id)).fetchone()
-            user = dict(row) if row else dict(xp=0, text_xp=0, voice_xp=0)
+            user = dict(row) if row else dict(xp=0, text_xp=0, voice_xp=0, shop_xp=0)
             user['rank'] = None if not row else 1 + db.execute(
                 'SELECT COUNT(*) FROM level_users WHERE guild_id=? AND (xp>? OR (xp=? AND user_id<?))',
                 (guild_id, user['xp'], user['xp'], user_id)).fetchone()[0]
@@ -350,7 +353,9 @@ class Leveling:
         else:
             embed.add_field(name='次のレベルまで', value=f"{next_xp - user['xp']:,} XP（{user['xp'] - start:,} / {next_xp - start:,}）", inline=False)
         embed.add_field(name='獲得内訳', value=f"テキスト：{user['text_xp']:,} XP\nVC：{user['voice_xp']:,} XP", inline=False)
-        adjustment = user['xp'] - user['text_xp'] - user['voice_xp']
+        if user['shop_xp']:
+            embed.add_field(name='ショップで購入したXP', value=f"{user['shop_xp']:,} XP", inline=False)
+        adjustment = user['xp'] - user['text_xp'] - user['voice_xp'] - user['shop_xp']
         if adjustment:
             embed.add_field(name='管理者によるXP調整', value=f'{adjustment:+,} XP', inline=False)
         await interaction.edit_original_response(embed=embed, allowed_mentions=discord.AllowedMentions.none())

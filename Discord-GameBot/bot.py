@@ -705,8 +705,10 @@ register_kakigoori(bot)
 from gemini_chat import register_gemini
 register_gemini(bot)
 from leveling import register_leveling
-register_leveling(bot)
+bot.leveling_service = register_leveling(bot)
 from casino import register_casino
 register_casino(bot)
+from shop import register_shop
+register_shop(bot)
 
 bot.run(TOKEN)

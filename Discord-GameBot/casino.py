@@ -240,7 +240,7 @@ class Casino:
             elif action == 'history':
                 rows = await asyncio.to_thread(self.store.history, guild_id, user_id)
                 text = '**💎 最近のジュエル履歴（最大10件）**\n' + ('\n'.join(
-                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'daily': 'デイリー', 'edit': '管理者編集', 'gift_send': '送金', 'gift_receive': '受取'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
+                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'daily': 'デイリー', 'edit': '管理者編集', 'gift_send': '送金', 'gift_receive': '受取', 'shop': 'ショップ'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
                     for row in rows) or 'まだ履歴がありません。')
             else:
                 text = ('**🎰 カジノ / 💎ジュエル**\n初期残高：0ジュエル。デイリー：500ジュエル（日本時間0時更新）。\n'

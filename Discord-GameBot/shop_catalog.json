@@ -1,0 +1,9 @@
+[
+  {"id":"xp5","name":"5XPアップ","kind":"xp","price":1000,"xp":5,"description":"購入するたびにDiscordのXPが5増えます。"},
+  {"id":"record_camera","name":"レコード：カメラ","kind":"record","price":2000,"sound":"random.screenshot","description":"Minecraft参加時、参加者全員にカメラの音。"},
+  {"id":"record_orb","name":"レコード：経験値","kind":"record","price":2500,"sound":"random.orb","description":"Minecraft参加時、参加者全員に経験値オーブの音。"},
+  {"id":"record_levelup","name":"レコード：レベルアップ","kind":"record","price":3000,"sound":"random.levelup","description":"Minecraft参加時、参加者全員にレベルアップの音。"},
+  {"id":"welcome_wild","name":"ようこそ：野生のプレイヤー","kind":"welcome","price":3000,"text":"あ！野生の<プレイヤーネーム>だ！","description":"あ！野生の<プレイヤーネーム>だ！"},
+  {"id":"welcome_hero","name":"ようこそ：主役登場","kind":"welcome","price":3500,"text":"本日の主役、<プレイヤーネーム>がやってきた！","description":"本日の主役、<プレイヤーネーム>がやってきた！"},
+  {"id":"welcome_royal","name":"ようこそ：盛大な歓迎","kind":"welcome","price":4000,"text":"みんなで歓迎！<プレイヤーネーム>、ようこそ！","description":"みんなで歓迎！<プレイヤーネーム>、ようこそ！"}
+]
