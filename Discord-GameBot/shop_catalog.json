@@ -1,9 +1,234 @@
 [
-  {"id":"xp5","name":"5XPアップ","kind":"xp","price":1000,"xp":5,"description":"購入するたびにDiscordのXPが5増えます。"},
-  {"id":"record_camera","name":"レコード：カメラ","kind":"record","price":2000,"sound":"random.screenshot","description":"Minecraft参加時、参加者全員にカメラの音。"},
-  {"id":"record_orb","name":"レコード：経験値","kind":"record","price":2500,"sound":"random.orb","description":"Minecraft参加時、参加者全員に経験値オーブの音。"},
-  {"id":"record_levelup","name":"レコード：レベルアップ","kind":"record","price":3000,"sound":"random.levelup","description":"Minecraft参加時、参加者全員にレベルアップの音。"},
-  {"id":"welcome_wild","name":"ようこそ：野生のプレイヤー","kind":"welcome","price":3000,"text":"あ！野生の<プレイヤーネーム>だ！","description":"あ！野生の<プレイヤーネーム>だ！"},
-  {"id":"welcome_hero","name":"ようこそ：主役登場","kind":"welcome","price":3500,"text":"本日の主役、<プレイヤーネーム>がやってきた！","description":"本日の主役、<プレイヤーネーム>がやってきた！"},
-  {"id":"welcome_royal","name":"ようこそ：盛大な歓迎","kind":"welcome","price":4000,"text":"みんなで歓迎！<プレイヤーネーム>、ようこそ！","description":"みんなで歓迎！<プレイヤーネーム>、ようこそ！"}
+  {
+    "id": "xp5",
+    "name": "5XPアップ",
+    "kind": "xp",
+    "price": 1000,
+    "xp": 5,
+    "description": "購入するたびにDiscordのXPが5増えます。"
+  },
+  {
+    "id": "record_camera",
+    "name": "レコード：カメラ",
+    "kind": "record",
+    "price": 2000,
+    "sound": "random.screenshot",
+    "description": "Minecraft参加時、参加者全員にカメラの音。"
+  },
+  {
+    "id": "record_orb",
+    "name": "レコード：経験値",
+    "kind": "record",
+    "price": 2500,
+    "sound": "random.orb",
+    "description": "Minecraft参加時、参加者全員に経験値オーブの音。"
+  },
+  {
+    "id": "record_levelup",
+    "name": "レコード：レベルアップ",
+    "kind": "record",
+    "price": 3000,
+    "sound": "random.levelup",
+    "description": "Minecraft参加時、参加者全員にレベルアップの音。"
+  },
+  {
+    "id": "welcome_wild",
+    "name": "ようこそ：野生のプレイヤー",
+    "kind": "welcome",
+    "price": 3000,
+    "text": "あ！野生の<プレイヤーネーム>だ！",
+    "description": "あ！野生の<プレイヤーネーム>だ！"
+  },
+  {
+    "id": "welcome_hero",
+    "name": "ようこそ：主役登場",
+    "kind": "welcome",
+    "price": 3500,
+    "text": "本日の主役、<プレイヤーネーム>がやってきた！",
+    "description": "本日の主役、<プレイヤーネーム>がやってきた！"
+  },
+  {
+    "id": "welcome_royal",
+    "name": "ようこそ：盛大な歓迎",
+    "kind": "welcome",
+    "price": 4000,
+    "text": "みんなで歓迎！<プレイヤーネーム>、ようこそ！",
+    "description": "みんなで歓迎！<プレイヤーネーム>、ようこそ！"
+  },
+  {
+    "id": "record_wind_charge",
+    "name": "レコード：ウィンドチャージ",
+    "kind": "record",
+    "price": 2500,
+    "sound": "wind_charge.burst",
+    "description": "Minecraft参加時、参加者全員にウィンドチャージの音。"
+  },
+  {
+    "id": "record_raid",
+    "name": "レコード：襲撃",
+    "kind": "record",
+    "price": 3500,
+    "sound": "raid.horn",
+    "description": "Minecraft参加時、参加者全員に襲撃の音。"
+  },
+  {
+    "id": "record_totem",
+    "name": "レコード：トーテム",
+    "kind": "record",
+    "price": 3500,
+    "sound": "random.totem",
+    "description": "Minecraft参加時、参加者全員にトーテムの音。"
+  },
+  {
+    "id": "record_horn_welcome",
+    "name": "レコード：歓迎の角笛",
+    "kind": "record",
+    "price": 3000,
+    "sound": "horn.call.0",
+    "description": "Minecraft参加時、参加者全員に歓迎の角笛の音。"
+  },
+  {
+    "id": "record_horn_joy",
+    "name": "レコード：喜びの角笛",
+    "kind": "record",
+    "price": 3000,
+    "sound": "horn.call.1",
+    "description": "Minecraft参加時、参加者全員に喜びの角笛の音。"
+  },
+  {
+    "id": "record_mock",
+    "name": "レコード：冷笑",
+    "kind": "record",
+    "price": 2500,
+    "sound": "random.hurt",
+    "description": "Minecraft参加時、参加者全員に冷笑の音。"
+  },
+  {
+    "id": "record_blaze",
+    "name": "レコード：ブレイズ",
+    "kind": "record",
+    "price": 3000,
+    "sound": "mob.blaze.shoot",
+    "description": "Minecraft参加時、参加者全員にブレイズの音。"
+  },
+  {
+    "id": "record_pig",
+    "name": "レコード：豚",
+    "kind": "record",
+    "price": 2000,
+    "sound": "mob.pig.death",
+    "description": "Minecraft参加時、参加者全員に豚の音。"
+  },
+  {
+    "id": "record_ghast",
+    "name": "レコード：ガスト",
+    "kind": "record",
+    "price": 3500,
+    "sound": "mob.ghast.scream",
+    "description": "Minecraft参加時、参加者全員にガストの音。"
+  },
+  {
+    "id": "record_dragon",
+    "name": "レコード：エンダードラゴン",
+    "kind": "record",
+    "price": 4000,
+    "sound": "mob.enderdragon.hit",
+    "description": "Minecraft参加時、参加者全員にエンダードラゴンの音。"
+  },
+  {
+    "id": "record_sonic_boom",
+    "name": "レコード：ソニックブーム",
+    "kind": "record",
+    "price": 4500,
+    "sound": "mob.warden.sonic_boom",
+    "description": "Minecraft参加時、参加者全員にソニックブームの音。"
+  },
+  {
+    "id": "record_warden",
+    "name": "レコード：ウォーデン",
+    "kind": "record",
+    "price": 4500,
+    "sound": "mob.warden.roar",
+    "description": "Minecraft参加時、参加者全員にウォーデンの音。"
+  },
+  {
+    "id": "welcome_arrived",
+    "name": "ようこそ：やってきました",
+    "kind": "welcome",
+    "price": 3000,
+    "text": "<プレイヤーネーム>がやってきました",
+    "description": "<プレイヤーネーム>がやってきました"
+  },
+  {
+    "id": "welcome_polite",
+    "name": "ようこそ：さん、ようこそ",
+    "kind": "welcome",
+    "price": 3000,
+    "text": "<プレイヤーネーム>さん、ようこそ。",
+    "description": "<プレイヤーネーム>さん、ようこそ。"
+  },
+  {
+    "id": "welcome_pizza",
+    "name": "ようこそ：ピザ持ってきた？",
+    "kind": "welcome",
+    "price": 3500,
+    "text": "やあ、<プレイヤーネーム>君。ピザ持ってきたよね？",
+    "description": "やあ、<プレイヤーネーム>君。ピザ持ってきたよね？"
+  },
+  {
+    "id": "welcome_landing",
+    "name": "ようこそ：ただいま着陸",
+    "kind": "welcome",
+    "price": 3500,
+    "text": "<プレイヤーネーム>がただいま着陸いたしました。",
+    "description": "<プレイヤーネーム>がただいま着陸いたしました。"
+  },
+  {
+    "id": "welcome_appeared",
+    "name": "ようこそ：出たぞー！",
+    "kind": "welcome",
+    "price": 3500,
+    "text": "<プレイヤーネーム>が出たぞー！",
+    "description": "<プレイヤーネーム>が出たぞー！"
+  },
+  {
+    "id": "welcome_cheer",
+    "name": "ようこそ：来たー！",
+    "kind": "welcome",
+    "price": 3500,
+    "text": "やったー、<プレイヤーネーム>が来たー！",
+    "description": "やったー、<プレイヤーネーム>が来たー！"
+  },
+  {
+    "id": "welcome_greet",
+    "name": "ようこそ：ちゃんとご挨拶",
+    "kind": "welcome",
+    "price": 4000,
+    "text": "いらっしゃい<プレイヤーネーム>ちゃん。ほら、ちゃんとご挨拶して！",
+    "description": "いらっしゃい<プレイヤーネーム>ちゃん。ほら、ちゃんとご挨拶して！"
+  },
+  {
+    "id": "welcome_slide",
+    "name": "ようこそ：ワールドに滑り込み",
+    "kind": "welcome",
+    "price": 3500,
+    "text": "<プレイヤーネーム>がワールドに滑り込みました。",
+    "description": "<プレイヤーネーム>がワールドに滑り込みました。"
+  },
+  {
+    "id": "welcome_party",
+    "name": "ようこそ：パーティに参加",
+    "kind": "welcome",
+    "price": 4000,
+    "text": "<プレイヤーネーム>がパーティに加わりました。",
+    "description": "<プレイヤーネーム>がパーティに加わりました。"
+  },
+  {
+    "id": "welcome_meet",
+    "name": "ようこそ：お会いできて何より",
+    "kind": "welcome",
+    "price": 3500,
+    "text": "<プレイヤーネーム>、お会いできて何よりです。",
+    "description": "<プレイヤーネーム>、お会いできて何よりです。"
+  }
 ]
