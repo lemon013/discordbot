@@ -37,3 +37,11 @@ AI設定は `Discord-GameBot/ai_settings.json` に保存します。MWSの再デ
 XPは既定で `Discord-GameBot/levels.sqlite3` に保存します。再デプロイで作業フォルダーが消える場合は、MWSの永続保存領域を `LEVEL_DB_PATH` 環境変数で指定してください。既存データを移動する場合はBot停止中にファイルを移してください。
 
 詳しい条件と設定は [LEVELING_README.md](Discord-GameBot/LEVELING_README.md) を参照してください。
+
+## 💎ジュエル・カジノ
+
+最新版を取り込んで再起動すると、`/casino slot`・`/casino coinflip`・`/casino dice` で遊べます。`/jewel balance` で残高、`/jewel daily` で1日1回の報酬、`/jewel history` で最近の履歴を確認できます。初期残高は1,000ジュエル、デイリーは日本時間0時更新で500ジュエルです。
+
+保存先は `CASINO_DB_PATH`、未設定なら `LEVEL_DB_PATH` と同じフォルダーの `casino.sqlite3`、どちらも未設定なら `Discord-GameBot/casino.sqlite3` です。MWSで保持される保存場所を利用し、保存先変更・バックアップはBot停止中に行ってください。
+
+詳しい配当とコマンドは [CASINO_README.md](Discord-GameBot/CASINO_README.md) を参照してください。

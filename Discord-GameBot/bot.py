@@ -706,5 +706,7 @@ from gemini_chat import register_gemini
 register_gemini(bot)
 from leveling import register_leveling
 register_leveling(bot)
+from casino import register_casino
+register_casino(bot)
 
 bot.run(TOKEN)
