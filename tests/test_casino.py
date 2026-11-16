@@ -1,8 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import datetime, timezone
 from itertools import product
 from pathlib import Path
 import sys
+import sqlite3
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -21,19 +23,26 @@ class CasinoStoreTests(unittest.TestCase):
         self.path = Path(self.temp.name) / 'casino.sqlite3'
         self.store = CasinoStore(self.path)
 
+    def seed(self, guild_id, user_id, balance):
+        self.store.balance(guild_id, user_id)
+        with closing(self.store.connect()) as db, db:
+            db.execute('UPDATE casino_wallets SET balance=? WHERE guild_id=? AND user_id=?',
+                       (balance, guild_id, user_id))
+
     def test_initial_wallet_is_once_persistent_and_guild_local(self):
-        self.assertEqual(self.store.balance(1, 10), 1000)
+        self.assertEqual(self.store.balance(1, 10), 0)
+        self.seed(1, 10, 1000)
         self.store.edit(1, 10, 'edit', 'subtract', 900, 99)
         self.assertEqual(CasinoStore(self.path).balance(1, 10), 100)
-        self.assertEqual(self.store.balance(2, 10), 1000)
+        self.assertEqual(self.store.balance(2, 10), 0)
 
     def test_jst_daily_boundary_duplicate_and_replay(self):
         now = datetime(2026, 11, 16, 14, 59, 59, tzinfo=timezone.utc).timestamp()
-        self.assertEqual(self.store.daily(1, 10, 'daily1', now)['balance'], 1500)
-        self.assertEqual(self.store.daily(1, 10, 'daily1', now)['balance'], 1500)
+        self.assertEqual(self.store.daily(1, 10, 'daily1', now)['balance'], 500)
+        self.assertEqual(self.store.daily(1, 10, 'daily1', now)['balance'], 500)
         with self.assertRaises(CasinoError):
             self.store.daily(1, 10, 'daily2', now)
-        self.assertEqual(self.store.daily(1, 10, 'daily3', now + 1)['balance'], 2000)
+        self.assertEqual(self.store.daily(1, 10, 'daily3', now + 1)['balance'], 1000)
         self.assertEqual(len(self.store.history(1, 10)), 2)
 
     def test_all_slot_outcomes_and_payouts(self):
@@ -57,6 +66,7 @@ class CasinoStoreTests(unittest.TestCase):
             self.assertEqual(draw('dice', 11, 6)['payout'], 0)
 
     def test_game_atomic_charge_payout_cooldown_and_replay(self):
+        self.seed(1, 10, 1000)
         with patch('casino.secrets.randbelow', return_value=0) as rng:
             result = self.store.play(1, 10, 'first', 'coinflip', 100, 0, now=100)
             self.assertEqual((result['payout'], result['balance']), (190, 1090))
@@ -76,10 +86,11 @@ class CasinoStoreTests(unittest.TestCase):
                 with self.assertRaises(CasinoError):
                     self.store.play(1, 10, game + str(choice), game, 10, choice, now=100)
             rng.assert_not_called()
-        self.assertEqual(self.store.balance(1, 10), 1000)
+        self.assertEqual(self.store.balance(1, 10), 0)
         self.assertEqual(self.store.history(1, 10), [])
 
     def test_concurrent_same_game_and_daily_only_pay_once(self):
+        self.seed(1, 10, 1000)
         with ThreadPoolExecutor(max_workers=6) as pool, patch('casino.secrets.randbelow', return_value=0) as rng:
             results = list(pool.map(lambda _: self.store.play(1, 10, 'same', 'coinflip', 100, 0, now=100), range(12)))
             self.assertTrue(all(result['balance'] == 1090 for result in results))
@@ -101,8 +112,8 @@ class CasinoStoreTests(unittest.TestCase):
         self.assertEqual(self.store.balance(1, 10), 0)
 
     def test_edit_modes_replay_audit_and_ranking(self):
-        self.assertEqual(self.store.edit(1, 10, 'a', 'add', 500, 99)['balance'], 1500)
-        self.assertEqual(self.store.edit(1, 10, 'a', 'add', 500, 99)['balance'], 1500)
+        self.assertEqual(self.store.edit(1, 10, 'a', 'add', 500, 99)['balance'], 500)
+        self.assertEqual(self.store.edit(1, 10, 'a', 'add', 500, 99)['balance'], 500)
         self.assertEqual(self.store.edit(1, 10, 'b', 'subtract', 2000, 99)['balance'], 0)
         self.assertEqual(self.store.edit(1, 10, 'c', 'set', 5000, 99)['actor_id'], 99)
         self.store.balance(1, 20)
@@ -115,6 +126,62 @@ class CasinoStoreTests(unittest.TestCase):
         with patch.dict('os.environ', {'LEVEL_DB_PATH': str(Path(self.temp.name) / 'persistent' / 'levels.sqlite3'), 'CASINO_DB_PATH': ''}):
             store = CasinoStore()
             self.assertEqual(store.path, Path(self.temp.name) / 'persistent' / 'casino.sqlite3')
+
+    def test_gift_conserves_balance_records_both_sides_and_replays(self):
+        self.seed(1, 10, 1000)
+        first = self.store.gift(1, 10, 20, 'gift', 250, now=100)
+        self.assertEqual(first['balance'], 750)
+        self.assertEqual(self.store.balance(1, 20), 250)
+        self.assertEqual(self.store.gift(1, 10, 20, 'gift', 250, now=101), first)
+        self.assertEqual(self.store.history(1, 10)[0]['delta'], -250)
+        self.assertEqual(self.store.history(1, 20)[0]['delta'], 250)
+        self.assertEqual(len(self.store.history(1, 20)), 1)
+        self.assertEqual(CasinoStore(self.path).balance(1, 20), 250)
+        with self.assertRaises(CasinoError):
+            self.store.gift(1, 10, 30, 'gift', 250)
+        self.assertEqual(self.store.balance(1, 10) + self.store.balance(1, 20), 1000)
+
+    def test_invalid_gifts_and_overflow_leave_balances_unchanged(self):
+        for receiver, amount in [(10, 1), (20, 0), (20, -1), (20, 10**9 + 1), (20, 1)]:
+            with self.assertRaises(CasinoError):
+                self.store.gift(1, 10, receiver, str(amount), amount)
+        self.assertEqual(self.store.leaderboard(1), [])
+        self.seed(1, 10, 1000)
+        self.seed(1, 20, 10**15)
+        with self.assertRaises(CasinoError):
+            self.store.gift(1, 10, 20, 'overflow', 1)
+        self.assertEqual(self.store.balance(1, 10), 1000)
+        self.assertEqual(self.store.balance(1, 20), 10**15)
+        self.assertEqual(self.store.history(1, 10), [])
+        with self.assertRaises(CasinoError):
+            self.store.gift(2, 10, 20, 'other-guild', 1)
+
+    def test_concurrent_gifts_cannot_duplicate_or_double_spend(self):
+        self.seed(1, 10, 1000)
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(lambda _: self.store.gift(1, 10, 20, 'same-gift', 250), range(12)))
+        self.assertTrue(all(result['balance'] == 750 for result in results))
+        self.assertEqual(self.store.balance(1, 20), 250)
+        self.assertEqual(len(self.store.history(1, 20)), 1)
+        def transfer(index):
+            try:
+                return self.store.gift(1, 10, 30, 'different-' + str(index), 700)
+            except CasinoError:
+                return None
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(transfer, range(12)))
+        self.assertEqual(sum(result is not None for result in results), 1)
+        self.assertEqual(sum(self.store.balance(1, user) for user in (10, 20, 30)), 1000)
+
+    def test_second_ledger_failure_rolls_back_entire_gift(self):
+        self.seed(1, 10, 1000)
+        with closing(self.store.connect()) as db, db:
+            db.execute("CREATE TRIGGER refuse_received BEFORE INSERT ON casino_transactions WHEN NEW.kind='gift_receive' BEGIN SELECT RAISE(ABORT, 'test failure'); END")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.gift(1, 10, 20, 'rollback', 250)
+        self.assertEqual(self.store.balance(1, 10), 1000)
+        self.assertEqual(self.store.balance(1, 20), 0)
+        self.assertEqual(self.store.history(1, 10), [])
 
 
 class CasinoCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -135,6 +202,7 @@ class CasinoCommandTests(unittest.IsolatedAsyncioTestCase):
             response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock())
 
     async def test_early_acknowledgement_and_public_game_result(self):
+        self.store.edit(1, 10, 'seed', 'set', 1000, 99)
         interaction = self.interaction()
         def rng(*args):
             interaction.response.defer.assert_awaited_once_with(thinking=True, ephemeral=False)
@@ -151,7 +219,7 @@ class CasinoCommandTests(unittest.IsolatedAsyncioTestCase):
         interaction.user.guild_permissions.manage_guild = True
         await self.service.execute(interaction, 'edit', mode='set', amount=9000, member=SimpleNamespace(id=20, bot=False))
         self.assertEqual(self.store.balance(1, 20), 9000)
-        self.assertEqual(self.store.balance(1, 10), 1000)
+        self.assertEqual(self.store.balance(1, 10), 0)
         self.assertFalse(interaction.edit_original_response.call_args.kwargs['allowed_mentions'].users)
 
     async def test_registration_and_six_sided_choice_validation(self):
@@ -172,6 +240,35 @@ class CasinoCommandTests(unittest.IsolatedAsyncioTestCase):
         interaction.guild = SimpleNamespace(id=1)
         await self.service.execute(interaction, 'balance', member=SimpleNamespace(id=20, bot=True))
         self.assertEqual(self.store.leaderboard(1), [])
+
+    async def test_public_gift_and_reject_bot_and_self(self):
+        self.store.edit(1, 10, 'seed', 'set', 1000, 99)
+        interaction = self.interaction()
+        await self.service.execute(interaction, 'gift', member=SimpleNamespace(id=20, bot=False), amount=250)
+        self.assertEqual(self.store.balance(1, 10), 750)
+        self.assertEqual(self.store.balance(1, 20), 250)
+        interaction.response.defer.assert_awaited_once_with(thinking=True, ephemeral=False)
+        text = interaction.edit_original_response.call_args.kwargs['content']
+        self.assertIn('<@20>', text)
+        self.assertNotIn('750', text)
+        self.assertFalse(interaction.edit_original_response.call_args.kwargs['allowed_mentions'].users)
+        interaction.id += 1
+        await self.service.execute(interaction, 'gift', member=SimpleNamespace(id=30, bot=True), amount=10)
+        self.assertEqual(self.store.balance(1, 10), 750)
+        interaction.id += 1
+        await self.service.execute(interaction, 'gift', member=interaction.user, amount=10)
+        self.assertEqual(self.store.balance(1, 10), 750)
+
+    async def test_gift_command_registration_and_required_target(self):
+        bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
+        with patch('casino.CasinoStore', return_value=self.store):
+            service = register_casino(bot)
+        command = bot.tree.get_command('gift')
+        self.assertTrue(command.guild_only)
+        self.assertTrue(all(parameter.required for parameter in command.parameters))
+        service.execute = AsyncMock()
+        await command.callback('interaction', 'recipient', 100)
+        service.execute.assert_awaited_once_with('interaction', 'gift', member='recipient', amount=100)
 
 
 if __name__ == '__main__':

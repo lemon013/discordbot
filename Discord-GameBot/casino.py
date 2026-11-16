@@ -16,7 +16,7 @@ import discord
 from discord import app_commands
 
 log = logging.getLogger(__name__)
-INITIAL_JEWELS = 1000
+INITIAL_JEWELS = 0
 DAILY_JEWELS = 500
 MIN_BET, MAX_BET = 10, 10000
 MAX_BALANCE = 10**15
@@ -151,6 +151,32 @@ class CasinoStore:
             result = dict(balance=balance, old_balance=wallet['balance'], mode=mode, amount=amount, actor_id=actor_id)
             return self.finish(db, event_id, guild_id, user_id, 'edit', wallet['balance'], result, now)
 
+    def gift(self, guild_id, sender_id, recipient_id, event_id, amount, now=None):
+        if sender_id == recipient_id:
+            raise CasinoError('自分自身にはジュエルを送れません。')
+        if not isinstance(amount, int) or not 1 <= amount <= 10**9:
+            raise CasinoError('送るジュエルは1〜10億で指定してください。')
+        now = time.time() if now is None else now
+        with closing(self.connect()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            previous = self.replay(db, event_id, guild_id, sender_id, 'gift_send')
+            if previous is not None:
+                if previous['recipient_id'] != recipient_id or previous['amount'] != amount:
+                    raise CasinoError('処理済みの送金内容と一致しません。')
+                return previous
+            sender = self.wallet(db, guild_id, sender_id)
+            if sender['balance'] < amount:
+                raise CasinoError(f"ジュエルが足りません。現在の残高：💎 {sender['balance']:,} ジュエル")
+            recipient = self.wallet(db, guild_id, recipient_id)
+            if recipient['balance'] + amount > MAX_BALANCE:
+                raise CasinoError('相手のジュエル保有上限を超えるため送れません。')
+            sent = dict(balance=sender['balance'] - amount, amount=amount, recipient_id=recipient_id)
+            received = dict(balance=recipient['balance'] + amount, amount=amount, sender_id=sender_id)
+            # Both balances and both history entries commit together or all roll back.
+            self.finish(db, event_id, guild_id, sender_id, 'gift_send', sender['balance'], sent, now)
+            self.finish(db, event_id + ':received', guild_id, recipient_id, 'gift_receive', recipient['balance'], received, now)
+            return sent
+
     def leaderboard(self, guild_id):
         with closing(self.connect()) as db:
             return [dict(row) for row in db.execute(
@@ -169,7 +195,7 @@ class Casino:
         self.store = store or CasinoStore()
 
     async def execute(self, interaction, action, **values):
-        await interaction.response.defer(thinking=True, ephemeral=action not in (*GAME_NAMES, 'leaderboard'))
+        await interaction.response.defer(thinking=True, ephemeral=action not in (*GAME_NAMES, 'leaderboard', 'gift'))
         if interaction.guild is None:
             await interaction.edit_original_response(content='このコマンドはサーバー内で使用してください。')
             return
@@ -198,6 +224,10 @@ class Casino:
             elif action == 'daily':
                 result = await asyncio.to_thread(self.store.daily, guild_id, user_id, event_id)
                 text = f"🎁 デイリー報酬 **💎 {result['reward']:,} ジュエル** を受け取りました！\n残高：💎 {result['balance']:,} ジュエル"
+            elif action == 'gift':
+                result = await asyncio.to_thread(self.store.gift, guild_id, interaction.user.id, member.id,
+                                                 event_id, values['amount'])
+                text = f"🎁 <@{interaction.user.id}> が <@{member.id}> に **💎 {result['amount']:,} ジュエル** を送りました！"
             elif action == 'edit':
                 if not interaction.user.guild_permissions.manage_guild:
                     raise CasinoError('この操作には「サーバー管理」権限が必要です。')
@@ -210,12 +240,12 @@ class Casino:
             elif action == 'history':
                 rows = await asyncio.to_thread(self.store.history, guild_id, user_id)
                 text = '**💎 最近のジュエル履歴（最大10件）**\n' + ('\n'.join(
-                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'daily': 'デイリー', 'edit': '管理者編集'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
+                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'daily': 'デイリー', 'edit': '管理者編集', 'gift_send': '送金', 'gift_receive': '受取'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
                     for row in rows) or 'まだ履歴がありません。')
             else:
-                text = ('**🎰 カジノ / 💎ジュエル**\n初期残高：1,000ジュエル。デイリー：500ジュエル（日本時間0時更新）。\n'
+                text = ('**🎰 カジノ / 💎ジュエル**\n初期残高：0ジュエル。デイリー：500ジュエル（日本時間0時更新）。\n'
                         '`/jewel balance` 残高 / `/jewel daily` デイリー / `/jewel history` 履歴\n'
-                        '`/jewel leaderboard` ランキング / `/jewel edit` 管理者編集\n'
+                        '`/jewel leaderboard` ランキング / `/jewel edit` 管理者編集 / `/gift` ジュエルを送る\n'
                         '`/casino slot`：3つ揃い 💎50倍 / ⭐20倍 / 🔔15倍 / 🍒10倍 / 🍇8倍 / 🍋5倍。2つ揃いは1倍。\n'
                         '`/casino coinflip`：表・裏を当てると1.9倍。\n'
                         '`/casino dice`：1〜6を当てると5.5倍。\n'
@@ -275,6 +305,12 @@ def register_casino(bot):
     @app_commands.choices(mode=[app_commands.Choice(name='加算', value='add'), app_commands.Choice(name='減算', value='subtract'), app_commands.Choice(name='指定', value='set')])
     async def edit(interaction: discord.Interaction, mode: str, amount: app_commands.Range[int, 0, 1000000000], member: discord.Member | None = None):
         await service.execute(interaction, 'edit', mode=mode, amount=amount, member=member)
+
+    @bot.tree.command(name='gift', description='相手に💎ジュエルを送ります')
+    @app_commands.guild_only()
+    @app_commands.describe(member='送り先のメンバー', amount='送るジュエル（1〜10億）')
+    async def gift(interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 1000000000]):
+        await service.execute(interaction, 'gift', member=member, amount=amount)
 
     bot.tree.add_command(casino)
     bot.tree.add_command(jewel)

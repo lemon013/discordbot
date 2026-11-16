@@ -40,8 +40,10 @@ XPは既定で `Discord-GameBot/levels.sqlite3` に保存します。再デプ�
 
 ## 💎ジュエル・カジノ
 
-最新版を取り込んで再起動すると、`/casino slot`・`/casino coinflip`・`/casino dice` で遊べます。`/jewel balance` で残高、`/jewel daily` で1日1回の報酬、`/jewel history` で最近の履歴を確認できます。初期残高は1,000ジュエル、デイリーは日本時間0時更新で500ジュエルです。
+最新版を取り込んで再起動すると、`/casino slot`・`/casino coinflip`・`/casino dice` で遊べます。`/jewel balance` で残高、`/jewel daily` で1日1回の報酬、`/jewel history` で最近の履歴を確認できます。初期残高は0ジュエル、デイリーは日本時間0時更新で500ジュエルです。
 
 保存先は `CASINO_DB_PATH`、未設定なら `LEVEL_DB_PATH` と同じフォルダーの `casino.sqlite3`、どちらも未設定なら `Discord-GameBot/casino.sqlite3` です。MWSで保持される保存場所を利用し、保存先変更・バックアップはBot停止中に行ってください。
 
 詳しい配当とコマンドは [CASINO_README.md](Discord-GameBot/CASINO_README.md) を参照してください。
+
+`/gift member:相手 amount:数` でジュエルを送れます。初期残高0は新規ユーザーに適用され、既存残高は維持します。
