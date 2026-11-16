@@ -88,6 +88,11 @@ class CasinoStore:
         balance = result['balance']
         if not 0 <= balance <= MAX_BALANCE:
             raise CasinoError('ジュエルの保有上限を超えるため処理できません。')
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='blackjack_rounds'").fetchone():
+            reserved = sum(row[0] * 5 // 2 for row in db.execute(
+                "SELECT wager FROM blackjack_rounds WHERE guild_id=? AND user_id=? AND status='active'", (guild_id, user_id)))
+            if balance + reserved > MAX_BALANCE:
+                raise CasinoError('ブラックジャックの払い戻し分を確保するため、保有上限付近では処理できません。')
         db.execute('UPDATE casino_wallets SET balance=? WHERE guild_id=? AND user_id=?', (balance, guild_id, user_id))
         db.execute('INSERT INTO casino_transactions VALUES(?,?,?,?,?,?,?,?)',
                    (event_id, guild_id, user_id, kind, balance - old_balance, balance,
@@ -240,7 +245,7 @@ class Casino:
             elif action == 'history':
                 rows = await asyncio.to_thread(self.store.history, guild_id, user_id)
                 text = '**💎 最近のジュエル履歴（最大10件）**\n' + ('\n'.join(
-                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'daily': 'デイリー', 'edit': '管理者編集', 'gift_send': '送金', 'gift_receive': '受取', 'shop': 'ショップ'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
+                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'daily': 'デイリー', 'edit': '管理者編集', 'gift_send': '送金', 'gift_receive': '受取', 'shop': 'ショップ', 'blackjack_bet': 'ブラックジャック掛け金', 'blackjack': 'ブラックジャック払い戻し'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
                     for row in rows) or 'まだ履歴がありません。')
             else:
                 text = ('**🎰 カジノ / 💎ジュエル**\n初期残高：0ジュエル。デイリー：500ジュエル（日本時間0時更新）。\n'
@@ -249,6 +254,7 @@ class Casino:
                         '`/casino slot`：3つ揃い 💎50倍 / ⭐20倍 / 🔔15倍 / 🍒10倍 / 🍇8倍 / 🍋5倍。2つ揃いは1倍。\n'
                         '`/casino coinflip`：表・裏を当てると1.9倍。\n'
                         '`/casino dice`：1〜6を当てると5.5倍。\n'
+                        '`/casino blackjack`：ヒット・スタンドで21を目指す。通常勝利2倍、最初の21は2.5倍、引き分けは返却。\n'
                         '賭け金：10〜10,000。倍率は賭け金を含む払い戻しで、小数点以下切り捨て。外れは0。\n'
                         'ジュエルはこのサーバー内のゲーム用通貨です。')
             await interaction.edit_original_response(content=text, allowed_mentions=discord.AllowedMentions.none())
@@ -312,6 +318,8 @@ def register_casino(bot):
     async def gift(interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 1000000000]):
         await service.execute(interaction, 'gift', member=member, amount=amount)
 
+    from blackjack import register_blackjack
+    register_blackjack(bot, casino, service.store)
     bot.tree.add_command(casino)
     bot.tree.add_command(jewel)
     return service

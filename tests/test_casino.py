@@ -226,7 +226,7 @@ class CasinoCommandTests(unittest.IsolatedAsyncioTestCase):
         bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
         with patch('casino.CasinoStore', return_value=self.store):
             service = register_casino(bot)
-        self.assertEqual({c.name for c in bot.tree.get_command('casino').commands}, {'slot', 'coinflip', 'dice', 'help'})
+        self.assertEqual({c.name for c in bot.tree.get_command('casino').commands}, {'slot', 'coinflip', 'dice', 'help', 'blackjack'})
         self.assertEqual({c.name for c in bot.tree.get_command('jewel').commands}, {'balance', 'daily', 'history', 'leaderboard', 'edit'})
         service.execute = AsyncMock()
         await bot.tree.get_command('casino').get_command('dice').callback('interaction', 100, 6)
