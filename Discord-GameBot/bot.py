@@ -99,6 +99,7 @@ class Player:
 
 @dataclass
 class Game:
+    reward_id: str = field(default_factory=lambda: __import__('uuid').uuid4().hex, init=False)
     guild_id: int
     channel_id: int
     host_id: int
@@ -405,6 +406,9 @@ async def resolve_votes(channel, game):
             await channel.send('**全員の役職・お題・NGワード**\n'+chunk); chunk = ''
         chunk += line+'\n'
     if chunk: await channel.send('**全員の役職・お題・NGワード**\n'+chunk)
+    from party_rewards import reward_party
+    outcomes = {uid: ((uid in game.wolf_ids) == (winner == 'ウルフ')) for uid in game.players}
+    await reward_party(bot, channel.guild, channel, game.reward_id, outcomes)
     games.pop(game.guild_id, None)
 
 
@@ -436,6 +440,8 @@ async def finish_by_wolf_ng(channel, game, player, word):
         chunk += line + '\n'
     if chunk:
         await channel.send('**全員の役職・お題・NGワード**\n' + chunk)
+    from party_rewards import reward_party
+    await reward_party(bot, channel.guild, channel, game.reward_id, {uid: uid not in game.wolf_ids for uid in game.players})
     games.pop(game.guild_id, None)
 
 
@@ -663,6 +669,7 @@ class Game8192View(discord.ui.View):
 async def game_8192(interaction: discord.Interaction):
     age = (discord.utils.utcnow() - interaction.created_at).total_seconds()
     log.info('/8192game received: id=%s age=%.3fs pid=%s', interaction.id, age, os.getpid())
+    # Acknowledge before constructing and sending the game board.
     await interaction.response.defer(thinking=True)
     player_id = interaction.user.id
     if player_id in solo_8192_games:
@@ -676,9 +683,9 @@ async def game_8192(interaction: discord.Interaction):
         view = Game8192View(player_id, 0)
         await interaction.edit_original_response(embed=game_8192_embed(0), view=view)
     except Exception:
+        # A failed send must not leave the user stuck in an invisible game.
         solo_8192_games.pop(player_id, None)
         raise
-
 
 @bot.tree.error
 async def on_app_command_error(interaction, error):
@@ -710,5 +717,9 @@ from casino import register_casino
 register_casino(bot)
 from shop import register_shop
 register_shop(bot)
+from party_rewards import PartyRewards
+from guess_number import register_guess
+bot.party_rewards = PartyRewards()
+register_guess(bot)
 
 bot.run(TOKEN)
