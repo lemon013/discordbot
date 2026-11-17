@@ -42,11 +42,19 @@ class GiveStore:
                 channel_id INTEGER NOT NULL, message_id INTEGER,
                 amount INTEGER NOT NULL, label TEXT NOT NULL,
                 expires_at REAL NOT NULL, disabled INTEGER NOT NULL DEFAULT 0)''')
+            db.execute('BEGIN IMMEDIATE')
+            columns = {row['name'] for row in db.execute('PRAGMA table_info(jewel_give_boards)')}
+            if 'max_claims' not in columns:
+                db.execute('ALTER TABLE jewel_give_boards ADD COLUMN max_claims INTEGER')
+            if 'claimed_count' not in columns:
+                db.execute('ALTER TABLE jewel_give_boards ADD COLUMN claimed_count INTEGER NOT NULL DEFAULT 0')
 
-    def create(self, board_id, guild_id, channel_id, amount, label, expires_at):
+    def create(self, board_id, guild_id, channel_id, amount, label, expires_at, max_claims=None):
+        if max_claims is not None and (type(max_claims) is not int or not 1 <= max_claims <= 10**9):
+            raise ValueError('受取人数は1～10億人で指定してください。未入力なら無制限です。')
         with closing(self.casino.connect()) as db, db:
-            db.execute('INSERT INTO jewel_give_boards(board_id,guild_id,channel_id,amount,label,expires_at) VALUES(?,?,?,?,?,?)',
-                       (board_id, guild_id, channel_id, amount, label, expires_at))
+            db.execute('INSERT INTO jewel_give_boards(board_id,guild_id,channel_id,amount,label,expires_at,max_claims) VALUES(?,?,?,?,?,?,?)',
+                       (board_id, guild_id, channel_id, amount, label, expires_at, max_claims))
 
     def attach(self, board_id, message_id):
         with closing(self.casino.connect()) as db, db:
@@ -72,9 +80,13 @@ class GiveStore:
             event_id = f'give:{board_id}:{user_id}'
             if self.casino.replay(db, event_id, guild_id, user_id, 'give') is not None:
                 raise CasinoError('このボードのジュエルは受取済みです（1人1回まで）。')
+            if row['max_claims'] is not None and row['claimed_count'] >= row['max_claims']:
+                raise CasinoError('受取人数の上限に達したため、この配布は終了しました。')
             wallet = self.casino.wallet(db, guild_id, user_id)
             result = dict(balance=wallet['balance'] + row['amount'], reward=row['amount'])
-            return self.casino.finish(db, event_id, guild_id, user_id, 'give', wallet['balance'], result, now)
+            self.casino.finish(db, event_id, guild_id, user_id, 'give', wallet['balance'], result, now)
+            db.execute('UPDATE jewel_give_boards SET claimed_count=claimed_count+1 WHERE board_id=?', (board_id,))
+            return result
 
 
 class GiveView(discord.ui.View):
@@ -111,7 +123,7 @@ class GiveService:
             text = '受取結果を確認できませんでした。もう一度押してください。重複して付与されることはありません。'
         await interaction.followup.send(text, ephemeral=True)
 
-    async def create(self, interaction, title, description, button, amount, color, duration):
+    async def create(self, interaction, title, description, button, amount, color, duration, max_claims=None):
         if interaction.user.id != OWNER_ID:
             await interaction.response.send_message('⚠️あなたには必要な権限がありません。', ephemeral=True)
             return
@@ -128,6 +140,8 @@ class GiveService:
                 raise ValueError('タイトルは1～256文字、説明は1～4096文字、ボタン名は1～80文字で指定してください。')
             if not 1 <= amount <= 10**9:
                 raise ValueError('配布するジュエルは1～10億で指定してください。')
+            if max_claims is not None and (type(max_claims) is not int or not 1 <= max_claims <= 10**9):
+                raise ValueError('受取人数は1～10億人で指定してください。未入力なら無制限です。')
         except ValueError as error:
             await interaction.response.send_message(str(error), ephemeral=True)
             return
@@ -137,11 +151,12 @@ class GiveService:
         embed = discord.Embed(title=title, description=description, color=color_value,
                               timestamp=datetime.fromtimestamp(expires_at, timezone.utc))
         embed.add_field(name='配布ジュエル', value=f'💎 {amount:,}ジュエル（1人1回）')
+        embed.add_field(name='受取人数', value=f'先着{max_claims:,}人' if max_claims is not None else '無制限')
         embed.add_field(name='配布終了', value=f'<t:{int(expires_at)}:F>\n<t:{int(expires_at)}:R>')
         embed.set_footer(text='配布終了日時')
         try:
             await asyncio.to_thread(self.store.create, board_id, interaction.guild_id, interaction.channel_id,
-                                    amount, button, expires_at)
+                                    amount, button, expires_at, max_claims)
             # Attach the message ID before enabling claims; failed publication cannot pay out.
             message = await interaction.channel.send(embed=embed, view=GiveView(self, board_id, button, True),
                                                      allowed_mentions=discord.AllowedMentions.none())
@@ -163,7 +178,8 @@ class GiveService:
     async def expire_tick(self):
         try:
             for row in await asyncio.to_thread(self.store.pending):
-                if time.time() < row['expires_at']:
+                full = row['max_claims'] is not None and row['claimed_count'] >= row['max_claims']
+                if time.time() < row['expires_at'] and not full:
                     continue
                 try:
                     channel = self.bot.get_channel(row['channel_id']) or await self.bot.fetch_channel(row['channel_id'])
@@ -184,14 +200,16 @@ def register_give(bot, casino, jewel):
 
     @jewel.command(name='give', description='管理者専用：1人1回受け取れるジュエル配布ボードを作成')
     @app_commands.rename(title='タイトル', description='説明', button='ボタン名', amount='ジュエル',
-                         color='色', duration='有効時間')
+                         color='色', duration='有効時間', max_claims='受取人数')
     @app_commands.describe(title='埋め込みボードのタイトル', description='説明（\\nで改行）',
                            button='受取ボタンの名前', amount='1人あたりの配布ジュエル',
-                           color='埋め込みの色', duration='ボタンを無効にするまでの時間：30分・24時間・7日など')
+                           color='埋め込みの色', duration='ボタンを無効にするまでの時間：30分・24時間・7日など',
+                           max_claims='先着で受け取れる人数（任意・未入力なら無制限）')
     @app_commands.choices(color=[app_commands.Choice(name=k, value=k) for k in COLORS])
     async def give(interaction: discord.Interaction, title: str, description: str, button: str,
-                   amount: app_commands.Range[int, 1, 1000000000], color: str, duration: str):
-        await service.create(interaction, title, description, button, amount, color, duration)
+                   amount: app_commands.Range[int, 1, 1000000000], color: str, duration: str,
+                   max_claims: app_commands.Range[int, 1, 1000000000] | None = None):
+        await service.create(interaction, title, description, button, amount, color, duration, max_claims)
 
     bot.add_listener(service.on_ready, 'on_ready')
     return service
