@@ -104,6 +104,30 @@ class CasinoStore:
             db.execute('BEGIN IMMEDIATE')
             return self.wallet(db, guild_id, user_id)['balance']
 
+    def reward_levels(self, guild_id, user_id, before, after):
+        """Pay each newly reached level once, with history and balance atomic."""
+        if not 0 <= before <= 100 or not 0 <= after <= 100:
+            raise ValueError('Invalid level')
+        with closing(self.connect()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute('''CREATE TABLE IF NOT EXISTS casino_level_rewards (
+                guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+                highest_level INTEGER NOT NULL, PRIMARY KEY(guild_id,user_id))''')
+            db.execute('INSERT OR IGNORE INTO casino_level_rewards VALUES(?,?,?)',
+                       (guild_id, user_id, before))
+            highest = db.execute('SELECT highest_level FROM casino_level_rewards WHERE guild_id=? AND user_id=?',
+                                 (guild_id, user_id)).fetchone()[0]
+            target = max(highest, before, after)
+            reward = max(0, after - max(highest, before)) * 200
+            if reward:
+                wallet = self.wallet(db, guild_id, user_id)
+                result = dict(balance=wallet['balance'] + reward, reward=reward, level=after)
+                self.finish(db, f'level:{guild_id}:{user_id}:{after}', guild_id, user_id,
+                            'level_reward', wallet['balance'], result, time.time())
+            db.execute('UPDATE casino_level_rewards SET highest_level=? WHERE guild_id=? AND user_id=?',
+                       (target, guild_id, user_id))
+            return reward
+
     def daily(self, guild_id, user_id, event_id, now=None):
         now = time.time() if now is None else now
         day = datetime.fromtimestamp(now, JST).date().isoformat()
@@ -245,7 +269,7 @@ class Casino:
             elif action == 'history':
                 rows = await asyncio.to_thread(self.store.history, guild_id, user_id)
                 text = '**💎 最近のジュエル履歴（最大10件）**\n' + ('\n'.join(
-                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'daily': 'デイリー', 'edit': '管理者編集', 'gift_send': '送金', 'gift_receive': '受取', 'shop': 'ショップ', 'blackjack_bet': 'ブラックジャック掛け金', 'blackjack': 'ブラックジャック払い戻し'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
+                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'level_reward': 'レベルアップ報酬', 'daily': 'デイリー', 'edit': '管理者編集', 'gift_send': '送金', 'gift_receive': '受取', 'shop': 'ショップ', 'blackjack_bet': 'ブラックジャック掛け金', 'blackjack': 'ブラックジャック払い戻し'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
                     for row in rows) or 'まだ履歴がありません。')
             else:
                 text = ('**🎰 カジノ / 💎ジュエル**\n初期残高：0ジュエル。デイリー：500ジュエル（日本時間0時更新）。\n'

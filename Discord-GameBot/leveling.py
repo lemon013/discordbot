@@ -247,6 +247,18 @@ class Leveling:
                         log.warning('Regular role granted but celebration could not be sent in guild %s', guild.id)
 
     async def notify(self, guild, results, cfg, fallback=None):
+        from casino import CasinoStore, CasinoError
+        rewards = {}
+        for result in results:
+            if result:
+                try:
+                    if not hasattr(self, 'jewel_store'):
+                        self.jewel_store = CasinoStore()
+                    rewards[result['user_id']] = await asyncio.to_thread(
+                        self.jewel_store.reward_levels, guild.id, result['user_id'],
+                        result['before'], result['after'])
+                except (sqlite3.Error, OSError, CasinoError):
+                    log.exception('Failed to grant level-up jewels in guild %s', guild.id)
         await self.reward_roles(guild, results, cfg, fallback)
         if not cfg['notifications']:
             return
@@ -254,6 +266,7 @@ class Leveling:
         if channel is None:
             return
         lines = [f"🎉 <@{r['user_id']}> が **Lv.{r['after']}** にレベルアップしました！"
+                 + (f" 💎 {rewards[r['user_id']]:,}ジュエル獲得！" if rewards.get(r['user_id']) else '')
                  for r in results if r and r['after'] > r['before']]
         try:
             for offset in range(0, len(lines), 10):
