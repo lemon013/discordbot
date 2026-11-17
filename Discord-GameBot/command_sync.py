@@ -6,7 +6,7 @@ log = logging.getLogger(__name__)
 
 async def sync_cloud_commands(bot, test_guild_id=None):
     import discord
-    managed = {command.name for command in bot.tree.get_commands()} | {'link', 'delete'}
+    managed = {command.name for command in bot.tree.get_commands()} | {'link', 'delete', 'give'}
     target = discord.Object(id=int(test_guild_id)) if test_guild_id else None
     if target:
         bot.tree.copy_global_to(guild=target)
@@ -23,7 +23,7 @@ async def sync_cloud_commands(bot, test_guild_id=None):
         try:
             commands = await bot.tree.fetch_commands(guild=guild)
             for command in commands:
-                obsolete = command.name in {'link', 'delete'}
+                obsolete = command.name in {'link', 'delete', 'give'}
                 other_scope = guild is None or target is None or guild.id != target.id
                 if obsolete or (other_scope and command.name in managed):
                     await command.delete()
