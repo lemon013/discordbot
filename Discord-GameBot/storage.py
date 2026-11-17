@@ -42,12 +42,21 @@ def snapshot(source, destination):
 def database_path(kind):
     name = 'levels.sqlite3' if kind == 'level' else 'casino.sqlite3'
     explicit = os.getenv('LEVEL_DB_PATH' if kind == 'level' else 'CASINO_DB_PATH')
+    cloud = os.getenv('CLOUD_MODE', '').lower() in ('1', 'true', 'yes')
+    if cloud and not (explicit or os.getenv('BOT_DATA_DIR') or
+                      (kind == 'casino' and os.getenv('LEVEL_DB_PATH'))):
+        raise RuntimeError(
+            'MWS: persistent player storage is not configured. Set BOT_DATA_DIR '
+            'to the actual persistent volume supplied by your host. '
+            'Refusing to create an empty database in temporary home storage.')
     if explicit:
         target = absolute_path(explicit)
     elif kind == 'casino' and os.getenv('LEVEL_DB_PATH'):
         target = absolute_path(os.environ['LEVEL_DB_PATH']).with_name(name)
     else:
         target = data_directory() / name
+    if cloud and target.is_relative_to(SOURCE.parent.resolve()):
+        raise RuntimeError('MWS: player database must be outside the replaceable source checkout; configure a persistent volume.')
     target.parent.mkdir(parents=True, exist_ok=True)
     marker = target.with_name(target.name + '.initialized')
     legacy = SOURCE / name

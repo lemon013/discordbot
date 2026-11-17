@@ -61,6 +61,25 @@ class StorageTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'refusing to reset'):
             LevelStore()
 
+    def test_cloud_requires_explicit_storage_before_creating_files(self):
+        with patch.dict(os.environ, {'CLOUD_MODE': '1', 'BOT_DATA_DIR': ''}):
+            with self.assertRaisesRegex(RuntimeError, 'persistent player storage is not configured'):
+                storage.database_path('level')
+        self.assertFalse(self.data.exists())
+
+    def test_cloud_rejects_checkout_storage(self):
+        with patch.dict(os.environ, {'CLOUD_MODE': '1', 'BOT_DATA_DIR': str(self.source / 'data')}):
+            with self.assertRaisesRegex(RuntimeError, 'outside the replaceable'):
+                storage.database_path('level')
+
+    def test_cloud_accepts_explicit_external_storage(self):
+        external = self.root.parent / (self.root.name + '-volume')
+        with patch.dict(os.environ, {'CLOUD_MODE': '1', 'BOT_DATA_DIR': str(external)}):
+            try:
+                self.assertEqual(storage.database_path('level'), external / 'levels.sqlite3')
+            finally:
+                external.rmdir()
+
     def test_existing_destination_never_overwritten_and_backup_restores(self):
         LevelStore(self.source / 'levels.sqlite3').edit(1, 2, 'xp', 'set', 999)
         target = LevelStore()
