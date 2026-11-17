@@ -20,7 +20,7 @@ class GiveTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.casino = CasinoStore(Path(self.temp.name) / 'casino.sqlite3')
         self.store = GiveStore(self.casino)
-        self.store.create('board', 1, 2, 200, '�󂯎��', 1000)
+        self.store.create('board', 1, 2, 200, '受け取る', 1000)
         self.store.attach('board', 3)
 
     def test_once_per_board_and_user_across_restart(self):
@@ -29,7 +29,7 @@ class GiveTests(unittest.TestCase):
         with self.assertRaises(CasinoError):
             restarted.claim('board', 1, 3, 10, now=901)
         self.assertEqual(restarted.claim('board', 1, 3, 11, now=901)['balance'], 200)
-        self.store.create('other', 1, 2, 300, '�󂯎��', 1000)
+        self.store.create('other', 1, 2, 300, '受け取る', 1000)
         self.store.attach('other', 4)
         self.assertEqual(self.store.claim('other', 1, 4, 10, now=902)['balance'], 500)
 
@@ -65,10 +65,10 @@ class GiveTests(unittest.TestCase):
         self.assertEqual(self.store.claim('board', 1, 3, 10, now=900)['balance'], 200)
 
     def test_duration_units_and_invalid_values(self):
-        for value, expected in [('60', 60), ('30��', 1800), ('24����', 86400),
-                                ('7��', 604800), ('30m', 1800), ('1h', 3600)]:
+        for value, expected in [('60', 60), ('30分', 1800), ('24時間', 86400),
+                                ('7日', 604800), ('30m', 1800), ('1h', 3600)]:
             self.assertEqual(duration_seconds(value), expected)
-        for value in ['0', '-1', '367��', 'forever', '1.5h']:
+        for value in ['0', '-1', '367日', 'forever', '1.5h']:
             with self.assertRaises(ValueError):
                 duration_seconds(value)
 
@@ -90,7 +90,7 @@ class GiveUITests(unittest.IsolatedAsyncioTestCase):
 
     async def test_only_specific_owner_can_create(self):
         interaction = self.interaction(1)
-        await self.service.create(interaction, 'test', 'body', 'claim', 200, '��', '1h')
+        await self.service.create(interaction, 'test', 'body', 'claim', 200, '青', '1h')
         interaction.response.send_message.assert_awaited_once()
         interaction.channel.send.assert_not_awaited()
 
@@ -101,7 +101,7 @@ class GiveUITests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.bot.tree.get_command('give'))
         command = self.bot.tree.get_command('jewel').get_command('give')
         self.assertEqual(command.qualified_name, 'jewel give')
-        await command.callback(interaction, 'Title', 'one\\ntwo', 'Claim', 200, '��', '1h')
+        await command.callback(interaction, 'Title', 'one\\ntwo', 'Claim', 200, '青', '1h')
         kwargs = interaction.channel.send.call_args.kwargs
         self.assertEqual(kwargs['embed'].description, 'one\ntwo')
         self.assertEqual(kwargs['embed'].color.value, 0x3498DB)
