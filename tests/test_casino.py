@@ -227,7 +227,7 @@ class CasinoCommandTests(unittest.IsolatedAsyncioTestCase):
         with patch('casino.CasinoStore', return_value=self.store):
             service = register_casino(bot)
         self.assertEqual({c.name for c in bot.tree.get_command('casino').commands}, {'slot', 'coinflip', 'dice', 'help', 'blackjack'})
-        self.assertEqual({c.name for c in bot.tree.get_command('jewel').commands}, {'balance', 'daily', 'history', 'leaderboard', 'edit'})
+        self.assertEqual({c.name for c in bot.tree.get_command('jewel').commands}, {'balance', 'daily', 'history', 'leaderboard', 'edit', 'give'})
         service.execute = AsyncMock()
         await bot.tree.get_command('casino').get_command('dice').callback('interaction', 100, 6)
         service.execute.assert_awaited_once_with('interaction', 'dice', wager=100, choice=6)
