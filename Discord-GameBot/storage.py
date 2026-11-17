@@ -43,7 +43,8 @@ def database_path(kind):
     name = 'levels.sqlite3' if kind == 'level' else 'casino.sqlite3'
     explicit = os.getenv('LEVEL_DB_PATH' if kind == 'level' else 'CASINO_DB_PATH')
     cloud = os.getenv('CLOUD_MODE', '').lower() in ('1', 'true', 'yes')
-    if cloud and not (explicit or os.getenv('BOT_DATA_DIR') or
+    remote = os.getenv('PLAYER_BACKUP_ACTIVE') == '1'
+    if cloud and not (remote or explicit or os.getenv('BOT_DATA_DIR') or
                       (kind == 'casino' and os.getenv('LEVEL_DB_PATH'))):
         raise RuntimeError(
             'MWS: persistent player storage is not configured. Set BOT_DATA_DIR '
@@ -55,13 +56,13 @@ def database_path(kind):
         target = absolute_path(os.environ['LEVEL_DB_PATH']).with_name(name)
     else:
         target = data_directory() / name
-    if cloud and target.is_relative_to(SOURCE.parent.resolve()):
+    if cloud and not remote and target.is_relative_to(SOURCE.parent.resolve()):
         raise RuntimeError('MWS: player database must be outside the replaceable source checkout; configure a persistent volume.')
     target.parent.mkdir(parents=True, exist_ok=True)
     marker = target.with_name(target.name + '.initialized')
     legacy = SOURCE / name
     if not target.exists():
-        if marker.exists():
+        if marker.exists() and not remote:
             raise RuntimeError(f'Player database is missing: {target}. Restore a backup before starting; refusing to reset balances/XP.')
         if legacy.exists() and legacy.resolve() != target:
             snapshot(legacy.resolve(), target)

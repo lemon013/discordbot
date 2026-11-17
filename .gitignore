@@ -16,3 +16,7 @@ Discord-GameBot/ai_settings.tmp
 *.sqlite3-shm
 *.sqlite3.initialized
 .db-backup-*
+*.before-discord-restore
+*.download
+discord-player-backup.json
+discord-player-backup.tmp

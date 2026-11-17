@@ -724,4 +724,6 @@ register_guess(bot)
 
 from storage import register_backups
 register_backups(bot)
+from player_backup import register as register_player_backup
+register_player_backup(bot)
 bot.run(TOKEN)
