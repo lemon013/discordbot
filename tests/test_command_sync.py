@@ -10,7 +10,7 @@ from command_sync import sync_cloud_commands
 class CommandSyncTests(unittest.TestCase):
     def check_scopes(self, target=None):
         deleted, synced, copied = [], [], []
-        names = ['wordwolfex', '8192game', 'player', 'vs', 'link', 'delete', 'unrelated']
+        names = ['wordwolfex', '8192game', 'player', 'vs', 'link', 'delete', 'unrelated', 'give']
 
         class Command:
             def __init__(self, name, scope):
@@ -42,6 +42,7 @@ class CommandSyncTests(unittest.TestCase):
         for scope in ([None, 123, 456] if target else [123, 456]):
             self.assertIn((scope, 'link'), deleted)
             self.assertIn((scope, 'delete'), deleted)
+            self.assertIn((scope, 'give'), deleted)
             self.assertNotIn((scope, 'unrelated'), deleted)
             for name in names[:4]:
                 self.assertEqual((scope, name) in deleted, scope != (int(target) if target else None))
