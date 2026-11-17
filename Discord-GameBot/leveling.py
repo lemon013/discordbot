@@ -14,6 +14,7 @@ import time
 import discord
 from discord import app_commands
 from discord.ext import tasks
+from storage import database_path, mark_initialized
 
 log = logging.getLogger(__name__)
 MAX_LEVEL = 100
@@ -38,7 +39,7 @@ def level_for(xp, base=300, step=50):
 class LevelStore:
     """Short SQLite transactions. Call blocking methods through asyncio.to_thread."""
     def __init__(self, path=None):
-        self.path = Path(path or os.getenv('LEVEL_DB_PATH') or Path(__file__).with_name('levels.sqlite3'))
+        self.path = Path(path) if path is not None else database_path('level')
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self.connect()) as db, db:
             db.executescript('''
@@ -70,6 +71,7 @@ class LevelStore:
                     migrated = True
             if migrated:
                 db.execute('UPDATE level_config SET text_xp_min=0,text_xp_max=0 WHERE text_xp=0')
+        mark_initialized(self.path)
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=10)

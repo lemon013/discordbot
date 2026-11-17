@@ -53,7 +53,9 @@
 
 1. `CASINO_DB_PATH` 環境変数で指定したファイル。
 2. `LEVEL_DB_PATH` が設定されていれば、そのファイルと同じフォルダー内の `casino.sqlite3`。
-3. 既定は `Discord-GameBot/casino.sqlite3`。
+3. `BOT_DATA_DIR` 内の `casino.sqlite3`。未指定時は `~/.discord-gamebot/casino.sqlite3`。
+
+旧 `Discord-GameBot/casino.sqlite3` が残っていれば初回に自動移行します。元ファイルは削除せず、移行先にDBがあれば上書きしません。残高・履歴・ショップ購入・ブラックジャック・レベル報酬の支給記録を同じDBのまま引き継ぎます。起動時と1時間ごとに `backups` へバックアップします。ホーム全体を初期化するホストでは `BOT_DATA_DIR` を実際の永続ボリュームに設定してください。
 
 MWSではGitHubの最新版を取り込んで再起動してください。起動ファイルは `cloud_main.py` のままです。追加ライブラリやAPIキーは不要です。再デプロイで消えないよう、必要に応じてMWSで保持される保存先を指定してください。`CASINO_DB_PATH` はSQLiteファイルのパスであり、永続ストレージを新しく作る設定ではありません。保存先を変えるときはBotを停止して既存ファイルを移してください。
 

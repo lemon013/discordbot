@@ -14,6 +14,7 @@ import time
 
 import discord
 from discord import app_commands
+from storage import database_path, mark_initialized
 
 log = logging.getLogger(__name__)
 INITIAL_JEWELS = 0
@@ -46,8 +47,7 @@ def draw(game, wager, choice=None):
 
 class CasinoStore:
     def __init__(self, path=None):
-        default = Path(os.getenv('LEVEL_DB_PATH') or Path(__file__).with_name('levels.sqlite3')).with_name('casino.sqlite3')
-        self.path = Path(path or os.getenv('CASINO_DB_PATH') or default)
+        self.path = Path(path) if path is not None else database_path('casino')
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self.connect()) as db, db:
             db.executescript('''
@@ -62,6 +62,7 @@ class CasinoStore:
                 CREATE INDEX IF NOT EXISTS casino_history ON casino_transactions(guild_id,user_id,created_at DESC);
                 CREATE INDEX IF NOT EXISTS casino_ranking ON casino_wallets(guild_id,balance DESC,user_id);
             ''')
+        mark_initialized(self.path)
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=10)
