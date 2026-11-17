@@ -17,19 +17,19 @@ from casino import CasinoError
 
 OWNER_ID = 799820074990698496
 log = logging.getLogger(__name__)
-COLORS = {'��': 0xE74C3C, '��': 0x3498DB, '��': 0xF1C40F, '��': 0x2ECC71,
-          '���F': 0x1ABCFF, '��': 0x9B59B6, '��': 0xE67E22, '�s���N': 0xFF69B4,
-          '��': 0xFFFFFF, '��': 0x000000, '��': 0xFFD700}
+COLORS = {'赤': 0xE74C3C, '青': 0x3498DB, '黄': 0xF1C40F, '緑': 0x2ECC71,
+          '水色': 0x1ABCFF, '紫': 0x9B59B6, '橙': 0xE67E22, 'ピンク': 0xFF69B4,
+          '白': 0xFFFFFF, '黒': 0x000000, '金': 0xFFD700}
 
 
 def duration_seconds(value):
-    match = re.fullmatch(r'\s*(\d+)\s*(�b|��|����|��|s|m|h|d)?\s*', value.lower())
+    match = re.fullmatch(r'\s*(\d+)\s*(秒|分|時間|日|s|m|h|d)?\s*', value.lower())
     if not match:
-        raise ValueError('���Ԃ� 60�b�E30���E24���ԁE7���i60s�E30m�E24h�E7d�j�Ŏw�肵�Ă��������B�����݂͕̂b�ł��B')
-    seconds = int(match[1]) * {'�b': 1, 's': 1, '��': 60, 'm': 60, '����': 3600,
-                              'h': 3600, '��': 86400, 'd': 86400, None: 1}[match[2]]
+        raise ValueError('時間は 60秒・30分・24時間・7日（60s・30m・24h・7d）で指定してください。数字のみは秒です。')
+    seconds = int(match[1]) * {'秒': 1, 's': 1, '分': 60, 'm': 60, '時間': 3600,
+                              'h': 3600, '日': 86400, 'd': 86400, None: 1}[match[2]]
     if not 1 <= seconds <= 366 * 86400:
-        raise ValueError('�z�z���Ԃ�1�b�`366���Ŏw�肵�Ă��������B')
+        raise ValueError('配布時間は1秒～366日で指定してください。')
     return seconds
 
 
@@ -66,12 +66,12 @@ class GiveStore:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT * FROM jewel_give_boards WHERE board_id=?', (board_id,)).fetchone()
             if not row or (row['guild_id'], row['message_id']) != (guild_id, message_id):
-                raise CasinoError('���̔z�z�{�[�h�͗��p�ł��܂���B')
+                raise CasinoError('この配布ボードは利用できません。')
             if row['disabled'] or now >= row['expires_at']:
-                raise CasinoError('���̃W���G���z�z�͏I�����܂����B')
+                raise CasinoError('このジュエル配布は終了しました。')
             event_id = f'give:{board_id}:{user_id}'
             if self.casino.replay(db, event_id, guild_id, user_id, 'give') is not None:
-                raise CasinoError('���̃{�[�h�̃W���G���͎��ς݂ł��i1�l1��܂Łj�B')
+                raise CasinoError('このボードのジュエルは受取済みです（1人1回まで）。')
             wallet = self.casino.wallet(db, guild_id, user_id)
             result = dict(balance=wallet['balance'] + row['amount'], reward=row['amount'])
             return self.casino.finish(db, event_id, guild_id, user_id, 'give', wallet['balance'], result, now)
@@ -98,36 +98,36 @@ class GiveService:
     async def claim(self, interaction, board_id):
         await interaction.response.defer(ephemeral=True, thinking=True)
         if interaction.guild_id is None or interaction.user.bot:
-            await interaction.followup.send('�T�[�o�[�̃����o�[�̂ݎ󂯎��܂��B', ephemeral=True)
+            await interaction.followup.send('サーバーのメンバーのみ受け取れます。', ephemeral=True)
             return
         try:
             result = await asyncio.to_thread(self.store.claim, board_id, interaction.guild_id,
                                              interaction.message.id, interaction.user.id)
-            text = f"?? {result['reward']:,}�W���G�����󂯎��܂����I\n�c���F{result['balance']:,}�W���G��"
+            text = f"💎 {result['reward']:,}ジュエルを受け取りました！\n残高：{result['balance']:,}ジュエル"
         except CasinoError as error:
             text = str(error)
         except (sqlite3.Error, OSError):
             log.exception('Give claim failed')
-            text = '��挋�ʂ��m�F�ł��܂���ł����B������x�����Ă��������B�d�����ĕt�^����邱�Ƃ͂���܂���B'
+            text = '受取結果を確認できませんでした。もう一度押してください。重複して付与されることはありません。'
         await interaction.followup.send(text, ephemeral=True)
 
     async def create(self, interaction, title, description, button, amount, color, duration):
         if interaction.user.id != OWNER_ID:
-            await interaction.response.send_message('??���Ȃ��ɂ͕K�v�Ȍ���������܂���B', ephemeral=True)
+            await interaction.response.send_message('⚠️あなたには必要な権限がありません。', ephemeral=True)
             return
         if interaction.guild_id is None:
-            await interaction.response.send_message('�T�[�o�[���Ŏg�p���Ă��������B', ephemeral=True)
+            await interaction.response.send_message('サーバー内で使用してください。', ephemeral=True)
             return
         try:
             seconds = duration_seconds(duration)
             color_value = COLORS.get(color)
             if color_value is None:
-                raise ValueError('�F�� ' + '�E'.join(COLORS) + ' ����I��ł��������B')
+                raise ValueError('色は ' + '・'.join(COLORS) + ' から選んでください。')
             description = description.replace('\\n', '\n')
             if not 1 <= len(title) <= 256 or not 1 <= len(description) <= 4096 or not 1 <= len(button) <= 80:
-                raise ValueError('�^�C�g����1�`256�����A������1�`4096�����A�{�^������1�`80�����Ŏw�肵�Ă��������B')
+                raise ValueError('タイトルは1～256文字、説明は1～4096文字、ボタン名は1～80文字で指定してください。')
             if not 1 <= amount <= 10**9:
-                raise ValueError('�z�z����W���G����1�`10���Ŏw�肵�Ă��������B')
+                raise ValueError('配布するジュエルは1～10億で指定してください。')
         except ValueError as error:
             await interaction.response.send_message(str(error), ephemeral=True)
             return
@@ -136,9 +136,9 @@ class GiveService:
         expires_at = time.time() + seconds
         embed = discord.Embed(title=title, description=description, color=color_value,
                               timestamp=datetime.fromtimestamp(expires_at, timezone.utc))
-        embed.add_field(name='�z�z�W���G��', value=f'?? {amount:,}�W���G���i1�l1��j')
-        embed.add_field(name='�z�z�I��', value=f'<t:{int(expires_at)}:F>\n<t:{int(expires_at)}:R>')
-        embed.set_footer(text='�z�z�I������')
+        embed.add_field(name='配布ジュエル', value=f'💎 {amount:,}ジュエル（1人1回）')
+        embed.add_field(name='配布終了', value=f'<t:{int(expires_at)}:F>\n<t:{int(expires_at)}:R>')
+        embed.set_footer(text='配布終了日時')
         try:
             await asyncio.to_thread(self.store.create, board_id, interaction.guild_id, interaction.channel_id,
                                     amount, button, expires_at)
@@ -149,9 +149,9 @@ class GiveService:
             await message.edit(view=GiveView(self, board_id, button))
         except (discord.HTTPException, sqlite3.Error, OSError):
             log.exception('Give board publication failed')
-            await interaction.followup.send('�z�z�{�[�h�����J�ł��܂���ł����B�`�����l�������ƕۑ�����m�F���Ă��������B', ephemeral=True)
+            await interaction.followup.send('配布ボードを公開できませんでした。チャンネル権限と保存先を確認してください。', ephemeral=True)
             return
-        await interaction.followup.send(f'�z�z�{�[�h���쐬���܂����B{message.jump_url}', ephemeral=True)
+        await interaction.followup.send(f'配布ボードを作成しました。{message.jump_url}', ephemeral=True)
 
     async def on_ready(self):
         for row in await asyncio.to_thread(self.store.pending):
@@ -182,12 +182,12 @@ class GiveService:
 def register_give(bot, casino, jewel):
     service = GiveService(bot, casino)
 
-    @jewel.command(name='give', description='�Ǘ��Ґ�p�F1�l1��󂯎���W���G���z�z�{�[�h���쐬')
-    @app_commands.rename(title='�^�C�g��', description='����', button='�{�^����', amount='�W���G��',
-                         color='�F', duration='�L������')
-    @app_commands.describe(title='���ߍ��݃{�[�h�̃^�C�g��', description='�����i\\n�ŉ��s�j',
-                           button='���{�^���̖��O', amount='1�l������̔z�z�W���G��',
-                           color='���ߍ��݂̐F', duration='�{�^���𖳌��ɂ���܂ł̎��ԁF30���E24���ԁE7���Ȃ�')
+    @jewel.command(name='give', description='管理者専用：1人1回受け取れるジュエル配布ボードを作成')
+    @app_commands.rename(title='タイトル', description='説明', button='ボタン名', amount='ジュエル',
+                         color='色', duration='有効時間')
+    @app_commands.describe(title='埋め込みボードのタイトル', description='説明（\\nで改行）',
+                           button='受取ボタンの名前', amount='1人あたりの配布ジュエル',
+                           color='埋め込みの色', duration='ボタンを無効にするまでの時間：30分・24時間・7日など')
     @app_commands.choices(color=[app_commands.Choice(name=k, value=k) for k in COLORS])
     async def give(interaction: discord.Interaction, title: str, description: str, button: str,
                    amount: app_commands.Range[int, 1, 1000000000], color: str, duration: str):
