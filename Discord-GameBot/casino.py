@@ -345,6 +345,8 @@ def register_casino(bot):
 
     from blackjack import register_blackjack
     register_blackjack(bot, casino, service.store)
+    from give import register_give
+    register_give(bot, service.store, jewel)
     bot.tree.add_command(casino)
     bot.tree.add_command(jewel)
     return service
