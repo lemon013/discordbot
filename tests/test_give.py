@@ -72,6 +72,51 @@ class GiveTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 duration_seconds(value)
 
+    def test_concurrent_different_users_respect_capacity(self):
+        self.store.create('limited', 1, 2, 200, 'Claim', 1000, max_claims=3)
+        self.store.attach('limited', 4)
+        def claim(user_id):
+            try:
+                return self.store.claim('limited', 1, 4, user_id, now=900)
+            except CasinoError:
+                return None
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(claim, range(10, 30)))
+        self.assertEqual(sum(r is not None for r in results), 3)
+        self.assertEqual(sum(self.casino.balance(1, user) for user in range(10, 30)), 600)
+        restarted = GiveStore(CasinoStore(self.casino.path))
+        with self.assertRaises(CasinoError):
+            restarted.claim('limited', 1, 4, 99, now=901)
+        row = next(r for r in restarted.pending() if r['board_id'] == 'limited')
+        self.assertEqual((row['max_claims'], row['claimed_count']), (3, 3))
+
+    def test_failed_or_duplicate_claim_does_not_consume_capacity(self):
+        self.store.create('limited', 1, 2, 200, 'Claim', 1000, max_claims=2)
+        self.store.attach('limited', 4)
+        self.casino.balance(1, 10)
+        with closing(self.casino.connect()) as db, db:
+            db.execute('UPDATE casino_wallets SET balance=? WHERE user_id=10', (MAX_BALANCE,))
+        with self.assertRaises(CasinoError):
+            self.store.claim('limited', 1, 4, 10, now=900)
+        self.store.claim('limited', 1, 4, 11, now=900)
+        with self.assertRaises(CasinoError):
+            self.store.claim('limited', 1, 4, 11, now=900)
+        self.store.claim('limited', 1, 4, 12, now=900)
+        with self.assertRaises(CasinoError):
+            self.store.claim('limited', 1, 4, 13, now=900)
+
+    def test_optional_capacity_and_old_schema_migration(self):
+        for value in [0, -1, True, 1.5, 10**9 + 1]:
+            with self.assertRaises(ValueError):
+                self.store.create('invalid', 1, 2, 200, 'Claim', 1000, value)
+        with closing(self.casino.connect()) as db, db:
+            db.execute('ALTER TABLE jewel_give_boards DROP COLUMN max_claims')
+            db.execute('ALTER TABLE jewel_give_boards DROP COLUMN claimed_count')
+        migrated = GiveStore(self.casino)
+        self.assertIsNone(migrated.pending()[0]['max_claims'])
+        for user in range(10, 30):
+            migrated.claim('board', 1, 3, user, now=900)
+
 
 class GiveUITests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -117,6 +162,23 @@ class GiveUITests(unittest.IsolatedAsyncioTestCase):
         await self.service.on_ready()
         self.service.expire_tick.cancel()
         self.assertEqual(len(self.bot.persistent_views), 1)
+        await self.service.expire_tick()
+        self.assertTrue(edit.call_args.kwargs['view'].children[0].disabled)
+        self.assertEqual(self.service.store.pending(), [])
+
+    async def test_capacity_option_and_full_board_disabled(self):
+        interaction = self.interaction(OWNER_ID)
+        message = SimpleNamespace(id=3, jump_url='https://discord.com/channels/1/2/3', edit=AsyncMock())
+        interaction.channel.send.return_value = message
+        command = self.bot.tree.get_command('jewel').get_command('give')
+        parameter = next(p for p in command.parameters if p.name == 'max_claims')
+        self.assertFalse(parameter.required)
+        await command.callback(interaction, 'Title', 'Body', 'Claim', 200, '青', '1h', 1)
+        embed = interaction.channel.send.call_args.kwargs['embed']
+        self.assertIn('先着1人', [field.value for field in embed.fields])
+        self.service.store.claim('123', 1, 3, 10)
+        edit = AsyncMock()
+        self.bot.get_channel = lambda _: SimpleNamespace(get_partial_message=lambda _: SimpleNamespace(edit=edit))
         await self.service.expire_tick()
         self.assertTrue(edit.call_args.kwargs['view'].children[0].disabled)
         self.assertEqual(self.service.store.pending(), [])
