@@ -83,7 +83,7 @@ def register_message_apps(bot):
         text = (f'高専適正度：**{score}%**\n'
                 '※ランダムなお遊び診断です。高専への適性を必ずお約束するものではありません。')
         try:
-            await message.reply(text, mention_author=False, fail_if_not_exists=True,
+            await message.reply(text, mention_author=False,
                                 allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
             await interaction.edit_original_response(
