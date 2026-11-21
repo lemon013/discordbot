@@ -20,7 +20,11 @@
 
 両方のrequirements.txtに音声用依存関係を追加しています。通常の起動・MWSのGitHub更新時に依存関係を再インストールしてください。手動なら `python -m pip install -r requirements.txt` の後でBotを再起動します。
 
-`discord.py[voice]>=2.7.1` でPyNaClとDAVE暗号化用のdaveyを導入し、`imageio-ffmpeg` の同梱FFmpegで音声をOpusへ変換します。FFmpegを同梱していないプラットフォームでは、FFmpegを別途導入し、`IMAGEIO_FFMPEG_EXE` に実行ファイルの絶対パスを指定してください。
+`discord.py[voice]==2.7.1` と `davey==0.2.0` に固定し、`voice_compat.py` で0.2系の鍵遷移手順へ対応しています。`discord.py[voice]` はPyNaClも導入します。`imageio-ffmpeg` の同梱FFmpegで音声をOpusへ変換します。FFmpegを同梱していないプラットフォームでは、FFmpegを別途導入し、`IMAGEIO_FFMPEG_EXE` に実行ファイルの絶対パスを指定してください。
+
+`davey 0.2.0` では `process_commit` / `process_welcome` 後に `prepare_transition` と `execute_transition` で暗号鍵を有効にする方式へ変更されました。discord.py 2.7.1の標準処理はこの変更に対応しておらず、VC接続が成功してもDAVE準備が完了しません。互換VoiceClientをこの機能にだけ使用し、サーバーのPrepare/Executeイベントに従って鍵を切り替えます。遷移IDが0の場合はprepare時に即適用されるため、executeを重ねて呼びません。無効なCommit/Welcomeは鍵を有効化せず、SDKの再生成処理に渡します。鍵や受信ペイロードはログに出しません。暗号化を無効化する回避策やSDK全体へのモンキーパッチは使用しません。公式の変更点：https://github.com/Snazzah/davey/releases/tag/py-0.2.0
+
+`/sound status` の「DAVE互換処理：0.2系の鍵切り替え対応版」と `discord.py=2.7.1、davey=0.2.0` を確認してください。`voice_compat.py` も更新に含めます。依存パッケージが異なる場合はMWSでパッケージを再インストールするか、起動ルートで `python -m pip install -r requirements.txt` を実行してから再起動します。ログの `DAVE key transition prepared` / `DAVE key transition activated` は遷移ID・バージョン・可否だけを示し、暗号鍵を含みません。
 
 MWS側でDiscordの音声接続（UDPなど）が許可されている必要があります。音声対応のネットワーク設定がある場合はそちらを選んでください。Botはホスティング側の通信制限を変更できません。
 

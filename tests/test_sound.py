@@ -65,7 +65,8 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
         self.call.response.defer.assert_not_awaited()
         self.call.response.send_message.assert_awaited_once()
         self.assertTrue(self.call.response.send_message.call_args.kwargs['ephemeral'])
-        self.channel.connect.assert_awaited_once_with(timeout=20, reconnect=False, self_deaf=True)
+        from voice_compat import CompatibleVoiceClient
+        self.channel.connect.assert_awaited_once_with(timeout=20, reconnect=False, self_deaf=True, cls=CompatibleVoiceClient)
         source = self.voice.play.call_args.args[0]
         self.assertIsInstance(source, UploadedAudio)
         self.assertTrue(source.is_opus())
@@ -391,6 +392,14 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
+    def test_incompatible_davey_is_rejected_before_voice_connection(self):
+        with patch('sound.version', return_value='0.3.0'):
+            with self.assertRaisesRegex(SoundError, '未対応.*davey=0.3.0'):
+                ffmpeg_executable()
+        with patch('sound.version', return_value='0.2.0'), \
+             patch('imageio_ffmpeg.get_ffmpeg_exe', return_value='compatible-ffmpeg'):
+            self.assertEqual(ffmpeg_executable(), 'compatible-ffmpeg')
+
     async def test_rejects_missing_audio_and_kills_timed_out_process(self):
         process = SimpleNamespace(wait=AsyncMock(return_value=1), returncode=1, kill=Mock())
         with patch('sound.asyncio.create_subprocess_exec', new=AsyncMock(return_value=process)):

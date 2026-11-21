@@ -61,9 +61,13 @@ def ffmpeg_executable():
     try:
         importlib.import_module('nacl')
         importlib.import_module('davey')
+        installed_davey = version('davey')
+        if discord.__version__ != '2.7.1' or not installed_davey.startswith(('0.1.', '0.2.')):
+            raise SoundError(f'音声ライブラリの組み合わせが未対応です（discord.py={discord.__version__}、davey={installed_davey}）。'
+                             '最新版requirements.txtで再インストールしてください。動作確認版はdiscord.py 2.7.1とdavey 0.2.0です。')
         from imageio_ffmpeg import get_ffmpeg_exe
         return get_ffmpeg_exe()
-    except (ImportError, RuntimeError):
+    except (ImportError, RuntimeError, PackageNotFoundError):
         raise SoundError('音声再生の準備ができていません。最新版のrequirements.txtでライブラリをインストールし、Botを再起動してください。') from None
 
 
@@ -184,8 +188,9 @@ class Sound:
         # connection timeout. Return the error first and finish cleanup separately.
         log.info('Starting sound voice connection (guild_id=%s, channel_id=%s, timeout=%s)',
                  guild.id, channel.id, CONNECT_TIMEOUT)
+        from voice_compat import CompatibleVoiceClient
         attempt = asyncio.create_task(channel.connect(
-            timeout=CONNECT_TIMEOUT, reconnect=False, self_deaf=True))
+            timeout=CONNECT_TIMEOUT, reconnect=False, self_deaf=True, cls=CompatibleVoiceClient))
         self.connecting[guild.id] = attempt
         try:
             done, _ = await asyncio.wait({attempt}, timeout=CONNECT_TIMEOUT)
@@ -226,6 +231,7 @@ class Sound:
             except PackageNotFoundError:
                 dependencies.append(f'{package}=未導入')
         return (f'VC接続：{"接続済み" if voice and voice.is_connected() else "未接続"}\n'
+                'DAVE互換処理：0.2系の鍵切り替え対応版\n'
                 f'DAVE暗号化：{encryption}\n'
                 f'{"再生中" if source else "直近の再生"}：読込 {stats[0]}フレーム／{stats[1]}バイト\n'
                 f'除外したヘッダー：{stats[2]}／再生エラー：{stats[3] or "なし"}\n'
