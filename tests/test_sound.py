@@ -1,8 +1,11 @@
 import asyncio
+import array
+import math
 import os
 from pathlib import Path
 import sys
 import subprocess
+import struct
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -69,10 +72,14 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
         directory = Path(source.directory.name)
         self.assertTrue(directory.exists())
         self.inner.cleanup.assert_not_called()
+        self.assertIsNotNone(source.stderr)
+        self.assertTrue(source.stderr.writable())
+        self.assertIsInstance(source.stderr.fileno(), int)
         source.cleanup()
         source.cleanup()
         self.assertFalse(directory.exists())
         self.inner.cleanup.assert_called_once()
+        self.assertTrue(source.stderr.closed)
         self.assertIn('再生しています', self.call.edit_original_response.call_args.kwargs['content'])
 
     async def test_text_channel_and_users_outside_voice_are_rejected(self):
@@ -245,7 +252,10 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
                 audio.setnchannels(1)
                 audio.setsampwidth(2)
                 audio.setframerate(48000)
-                audio.writeframes(b'\x00\x00' * 9600)
+                # A real tone, rather than silence: packet existence alone does not
+                # demonstrate that the outgoing stream contains audible samples.
+                audio.writeframes(b''.join(struct.pack('<h', int(10000 * math.sin(
+                    2 * math.pi * 440 * n / 48000))) for n in range(9600)))
         self.file.save.side_effect = save_wave
         with patch('sound.ffmpeg_executable', new=ffmpeg_executable), \
              patch('sound.verify_audio', new=verify_audio), \
@@ -253,6 +263,7 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
             await self.service.invoke(self.call, 'play', self.file)
         self.assertIn('再生しています', self.call.edit_original_response.call_args.kwargs['content'])
         source = self.service.playing[1]
+        self.assertIsNone(source.source._pipe_reader_thread)
         path = Path(source.directory.name)
         def read_all():
             return list(iter(source.read, b''))
@@ -260,6 +271,15 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
             packets = await asyncio.wait_for(asyncio.to_thread(read_all), timeout=15)
             self.assertTrue(packets)
             self.assertTrue(source.is_opus())
+            try:
+                decoder = discord.opus.Decoder()
+            except discord.opus.OpusNotLoaded:
+                self.skipTest('Optional native Opus decoder unavailable for amplitude verification')
+            pcm = b''.join(decoder.decode(packet, fec=False) for packet in packets
+                           if not packet.startswith((b'OpusHead', b'OpusTags')))
+            samples = array.array('h', pcm)
+            self.assertTrue(samples)
+            self.assertGreater(math.sqrt(sum(value * value for value in samples) / len(samples)), 1000)
         finally:
             source.cleanup()
         self.assertFalse(path.exists())
