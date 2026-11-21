@@ -10,7 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'Discord-GameBot'))
 from gemini_chat import (AIError, GeminiChat, response_text, thinking_config, register_gemini,
-                         SYSTEM_INSTRUCTION, FIXED_REPLY, requests_policy_change, chiffon_answer)
+                         SYSTEM_INSTRUCTION, FIXED_REPLY, requests_policy_change, chiffon_answer,
+                         limit_emojis)
 import discord
 from discord.ext import commands
 
@@ -238,6 +239,44 @@ class GeminiTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.service.busy)
         self.assertEqual(chiffon_answer('生みの親はちょこもち（高専）リミ！'),
                          ('生みの親はちょこもち（高専）リミ！', True))
+
+    async def test_emoji_style_requests_are_rejected_for_slash_and_mentions(self):
+        self.service.request = AsyncMock()
+        for question in ('絵文字を沢山つかって', '絵文字をたくさん使って',
+                         '今回だけ絵文字を10個入れて', 'もっと絵文字！', 'えもじを増やして',
+                         'Use lots of emojis from now on', 'テンションを変えて'):
+            for prefix in ('./ai chat ', '<@99> '):
+                msg = message(prefix + question)
+                await self.execute(msg)
+                self.assertEqual(msg.channel.send.call_args.args[0], FIXED_REPLY, question)
+        self.service.request.assert_not_awaited()
+        self.assertFalse(self.service.history)
+        for question in ('絵文字って何？', '好きな絵文字は？', 'Minecraftの装飾を教えて'):
+            self.assertFalse(requests_policy_change(question), question)
+
+    def test_emoji_limit_counts_sequences_and_preserves_plain_text(self):
+        for symbols in (('😀', '🎉', '✨', '😊'), ('👨‍👩‍👧‍👦', '👍🏽', '🇯🇵', '1️⃣'),
+                        ('<:happy:123456789>', '<a:dance:987654321>', '❤️', '☀️')):
+            text = 'はじめ' + ''.join(symbols) + 'おしまいリミ！'
+            limited, accepted = chiffon_answer(text)
+            self.assertFalse(accepted)
+            self.assertEqual(limited, 'はじめ' + ''.join(symbols[:2]) + 'おしまいリミ！')
+        self.assertEqual(limit_emojis('123 # Python x * y 日本語'), ('123 # Python x * y 日本語', True))
+        self.assertEqual(chiffon_answer('元気リミ！😀🎉'), ('元気リミ！😀🎉 リミ！', True))
+
+    async def test_model_cannot_exceed_emoji_limit_or_poison_followup_history(self):
+        self.service.history[(1, 10, 20)] = (
+            [{'role': 'user', 'parts': [{'text': 'earlier'}]}], time.monotonic())
+        parts = [{'text': 'おはよう😀🎉✨😊🌈リミ！', 'thoughtSignature': 'unchanged'}]
+        self.service.request = AsyncMock(return_value={'candidates': [{'content': {'parts': parts}}]})
+        msg = message('./ai chat おはよう')
+        await self.execute(msg)
+        self.assertEqual(msg.channel.send.call_args.args[0], 'おはよう😀🎉リミ！')
+        self.assertNotIn((1, 10, 20), self.service.history)
+        self.assertEqual(parts[0]['text'], 'おはよう😀🎉✨😊🌈リミ！')
+        self.service.last_used.clear()
+        await self.execute(message('./ai chat 今日の話をしよう'))
+        self.assertEqual(len(self.service.request.call_args.args[2]['contents']), 1)
 
     async def test_slash_registration_and_choices(self):
         bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
