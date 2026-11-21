@@ -16,7 +16,8 @@ import discord
 from discord.ext import commands
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'Discord-GameBot'))
-from sound import MAX_BYTES, Sound, UploadedAudio, SoundError, register_sound, verify_audio, ffmpeg_executable
+from sound import (MAX_BYTES, Sound, UploadedAudio, SoundError, register_sound, verify_audio,
+                   ffmpeg_executable, make_test_tone, wait_for_voice_encryption)
 
 REAL_FFMPEG_OPUS_AUDIO = discord.FFmpegOpusAudio
 
@@ -236,7 +237,7 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
         service = register_sound(bot)
         group = bot.tree.get_command('sound')
         self.assertTrue(group.guild_only)
-        self.assertEqual({c.name for c in group.commands}, {'play','stop','leave'})
+        self.assertEqual({c.name for c in group.commands}, {'play','stop','leave','test','status'})
         self.assertEqual(group.get_command('play').parameters[0].type, discord.AppCommandOptionType.attachment)
         service.invoke = AsyncMock()
         await group.get_command('play').callback(self.call, self.file)
@@ -271,12 +272,16 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
             packets = await asyncio.wait_for(asyncio.to_thread(read_all), timeout=15)
             self.assertTrue(packets)
             self.assertTrue(source.is_opus())
+            self.assertGreaterEqual(source.skipped_headers, 2)
+            self.assertTrue(all(not p.startswith((b'OpusHead', b'OpusTags')) for p in packets))
             try:
                 decoder = discord.opus.Decoder()
             except discord.opus.OpusNotLoaded:
                 self.skipTest('Optional native Opus decoder unavailable for amplitude verification')
             pcm = b''.join(decoder.decode(packet, fec=False) for packet in packets
                            if not packet.startswith((b'OpusHead', b'OpusTags')))
+            self.assertTrue(all(decoder.packet_get_nb_frames(p) * decoder.packet_get_samples_per_frame(p) == 960
+                                for p in packets))
             samples = array.array('h', pcm)
             self.assertTrue(samples)
             self.assertGreater(math.sqrt(sum(value * value for value in samples) / len(samples)), 1000)
@@ -330,6 +335,59 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
         self.channel.connect.assert_not_awaited()
         self.assertIn('音声を読み取れません', self.call.edit_original_response.call_args.kwargs['content'])
         self.assertFalse(paths[0].exists())
+
+    async def test_headers_are_not_exposed_as_audio_and_source_errors_are_forwarded(self):
+        directory = tempfile.TemporaryDirectory()
+        error = RuntimeError('decoder stopped')
+        inner = SimpleNamespace(read=Mock(side_effect=[b'OpusHead123',b'OpusTags456',b'audio',b'']),
+                                is_opus=lambda: True, cleanup=Mock(), _current_error=error)
+        source = UploadedAudio(inner, directory, Mock())
+        try:
+            self.assertEqual(source.read(), b'audio')
+            self.assertEqual(source.read(), b'')
+            self.assertEqual((source.frames, source.audio_bytes, source.skipped_headers), (1,5,2))
+            self.assertIs(source._current_error, error)
+        finally:
+            source.cleanup()
+
+    async def test_dave_keys_are_required_before_starting_playback(self):
+        state = SimpleNamespace(dave_protocol_version=1, can_encrypt=False)
+        self.voice._connection = state
+        async def ready(_):
+            state.can_encrypt = True
+        with patch('sound.asyncio.sleep', new=AsyncMock(side_effect=ready)):
+            await wait_for_voice_encryption(self.voice)
+        state.can_encrypt = False
+        with patch('sound.DAVE_READY_TIMEOUT', 0):
+            with self.assertRaisesRegex(SoundError, 'DAVE'):
+                await wait_for_voice_encryption(self.voice)
+        self.guild.voice_client = self.voice
+        with patch('sound.DAVE_READY_TIMEOUT', 0):
+            await self.service.invoke(self.call, 'play', self.file)
+        self.voice.play.assert_not_called()
+        self.assertIn('DAVE', self.call.edit_original_response.call_args.kwargs['content'])
+
+    async def test_test_command_creates_audible_three_second_file_and_status_is_read_only(self):
+        tone = make_test_tone()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'tone.wav'
+            await tone.save(path)
+            with wave.open(str(path), 'rb') as audio:
+                self.assertEqual(audio.getnframes(), 144000)
+                samples = array.array('h', audio.readframes(144000))
+            self.assertGreater(max(abs(value) for value in samples), 7000)
+        self.service.play = AsyncMock(return_value='test started')
+        await self.service.invoke(self.call, 'test')
+        generated = self.service.play.call_args.args[2]
+        self.assertEqual(generated.filename, 'sound-test-440Hz.wav')
+        self.service.last_stats[1] = (150, 5000, 2, None)
+        await self.service.invoke(self.call, 'status')
+        output = self.call.edit_original_response.call_args.kwargs['content']
+        self.assertIn('150フレーム', output)
+        self.assertIn('5000バイト', output)
+        self.assertIn('discord.py=', output)
+        self.assertNotIn('token', output.lower())
+        self.assertEqual(self.service.play.await_count, 1)
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
