@@ -13,7 +13,8 @@ from discord import app_commands
 
 log = logging.getLogger(__name__)
 MAX_BYTES = 25 * 1024 * 1024
-EXTENSIONS = {'.mp3', '.wav', '.ogg', '.opus', '.m4a', '.aac', '.flac', '.webm'}
+CONNECT_TIMEOUT = 20
+EXTENSIONS = {'.mp3', '.wav', '.ogg', '.opus', '.m4a', '.aac', '.flac', '.webm', '.mp4'}
 
 
 class SoundError(Exception):
@@ -79,6 +80,7 @@ class Sound:
     def __init__(self, bot):
         self.bot = bot
         self.locks, self.playing, self.idle_tasks = {}, {}, {}
+        self.preparing, self.connecting = set(), {}
 
     def lock(self, guild_id):
         return self.locks.setdefault(guild_id, asyncio.Lock())
@@ -96,6 +98,50 @@ class Sound:
         if task and task is not asyncio.current_task():
             task.cancel()
 
+    async def status(self, interaction, text):
+        try:
+            await asyncio.wait_for(interaction.edit_original_response(
+                content=text, allowed_mentions=discord.AllowedMentions.none()), timeout=5)
+        except (discord.DiscordException, asyncio.TimeoutError):
+            log.warning('Could not update sound command status (guild_id=%s)', interaction.guild_id)
+
+    async def cleanup_connection(self, guild, attempt):
+        voice = None
+        try:
+            try:
+                voice = await attempt
+            except (asyncio.CancelledError, Exception):
+                pass
+            failed = guild.voice_client or voice
+            if failed:
+                await failed.disconnect(force=True)
+        except Exception:
+            log.warning('Could not clean failed voice connection (guild_id=%s)', guild.id)
+        finally:
+            if self.connecting.get(guild.id) is asyncio.current_task():
+                self.connecting.pop(guild.id, None)
+
+    async def connect_voice(self, guild, channel):
+        # wait_for waits for SDK cancellation/cleanup; that can itself take another
+        # connection timeout. Return the error first and finish cleanup separately.
+        log.info('Starting sound voice connection (guild_id=%s, channel_id=%s, timeout=%s)',
+                 guild.id, channel.id, CONNECT_TIMEOUT)
+        attempt = asyncio.create_task(channel.connect(
+            timeout=CONNECT_TIMEOUT, reconnect=False, self_deaf=True))
+        self.connecting[guild.id] = attempt
+        try:
+            done, _ = await asyncio.wait({attempt}, timeout=CONNECT_TIMEOUT)
+            if not done:
+                raise asyncio.TimeoutError()
+            voice = attempt.result()
+        except BaseException:
+            log.warning('Sound voice connection did not complete (guild_id=%s)', guild.id)
+            attempt.cancel()
+            self.connecting[guild.id] = asyncio.create_task(self.cleanup_connection(guild, attempt))
+            raise
+        self.connecting.pop(guild.id, None)
+        return voice
+
     async def finished(self, guild, source):
         async with self.lock(guild.id):
             if self.playing.get(guild.id) is not source:
@@ -110,6 +156,7 @@ class Sound:
             async with self.lock(guild.id):
                 voice = guild.voice_client
                 if (voice and voice.is_connected() and guild.id not in self.playing
+                        and guild.id not in self.preparing and guild.id not in self.connecting
                         and not voice.is_playing() and not voice.is_paused()):
                     await voice.disconnect(force=True)
         except asyncio.CancelledError:
@@ -123,7 +170,7 @@ class Sound:
     async def play(self, interaction, channel, attachment):
         suffix = Path(attachment.filename).suffix.lower()
         if suffix not in EXTENSIONS:
-            raise SoundError('MP3・WAV・OGG・OPUS・M4A・AAC・FLAC・WEBMの音声ファイルを添付してください。')
+            raise SoundError('MP3・WAV・OGG・OPUS・M4A・AAC・FLAC・WEBM・MP4のファイルを添付してください。MP4は音声のみ再生します。')
         if attachment.size <= 0 or attachment.size > MAX_BYTES:
             raise SoundError('音声ファイルは25MB以内で添付してください。')
         permissions = channel.permissions_for(interaction.guild.me)
@@ -135,16 +182,22 @@ class Sound:
             raise SoundError('Botは別のVCで使用中です。先にそのVCで /sound leave を実行してください。')
         if guild.id in self.playing or (voice and (voice.is_playing() or voice.is_paused())):
             raise SoundError('再生中です。終了を待つか /sound stop で停止してから再生してください。')
+        if guild.id in self.connecting:
+            raise SoundError('前回のVC接続を終了処理中です。終了を待ってから再試行してください。')
         executable = await asyncio.to_thread(ffmpeg_executable)
         directory = tempfile.TemporaryDirectory(prefix='discord-sound-')
         source = None
         started = False
         joined = False
+        self.preparing.add(guild.id)
+        self.cancel_idle(guild.id)
         try:
             path = Path(directory.name) / ('audio' + suffix)
+            await self.status(interaction, '📥 添付ファイルを取得しています。')
             await asyncio.wait_for(attachment.save(path), timeout=30)
             if path.stat().st_size <= 0 or path.stat().st_size > MAX_BYTES:
                 raise SoundError('音声ファイルは25MB以内で添付してください。')
+            await self.status(interaction, '🎵 ファイルの音声を確認しています。MP4は音声のみ使用します。')
             await verify_audio(executable, path)
             # Recheck membership after downloading/validating the file.
             self.target(interaction)
@@ -152,14 +205,9 @@ class Sound:
                 await voice.disconnect(force=True)
                 voice = None
             if voice is None:
-                try:
-                    voice = await channel.connect(timeout=20, reconnect=True, self_deaf=True)
-                    joined = True
-                except BaseException:
-                    failed = guild.voice_client
-                    if failed:
-                        await failed.disconnect(force=True)
-                    raise
+                await self.status(interaction, '🔊 VCに接続しています（最大20秒）。')
+                voice = await self.connect_voice(guild, channel)
+                joined = True
             loop = asyncio.get_running_loop()
 
             def cleanup_complete(audio):
@@ -183,6 +231,7 @@ class Sound:
             voice.play(source, after=after)
             started = True
         finally:
+            self.preparing.discard(guild.id)
             if not started:
                 self.playing.pop(guild.id, None)
                 if source:
@@ -190,15 +239,26 @@ class Sound:
                 else:
                     directory.cleanup()
                 if joined and voice:
-                    await voice.disconnect(force=True)
+                    completed = asyncio.get_running_loop().create_future()
+                    completed.set_result(voice)
+                    self.connecting[guild.id] = asyncio.create_task(self.cleanup_connection(guild, completed))
+                elif voice and voice.is_connected() and guild.id not in self.connecting:
+                    self.cancel_idle(guild.id)
+                    self.idle_tasks[guild.id] = asyncio.create_task(self.idle_disconnect(guild))
         filename = discord.utils.escape_markdown(attachment.filename[:100])
         return f'▶️ {filename} を再生しています。再生終了後、60秒で自動退出します。'
 
     async def invoke(self, interaction, action, attachment=None):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        # Resolve Discord's "thinking" indicator before file/network preparation.
+        await interaction.response.send_message(
+            '音声の準備を始めます。' if action == 'play' else '音声の操作を受け付けました。',
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
         try:
             channel = self.target(interaction)
-            async with self.lock(interaction.guild.id):
+            lock = self.lock(interaction.guild.id)
+            if lock.locked():
+                raise SoundError('音声の準備・操作中です。表示が更新されるまでお待ちください。')
+            async with lock:
                 if action == 'play':
                     answer = await self.play(interaction, channel, attachment)
                 else:
@@ -220,11 +280,12 @@ class Sound:
         except SoundError as exc:
             answer = str(exc)
         except asyncio.TimeoutError:
-            answer = '音声の取得・確認、またはVCへの接続がタイムアウトしました。再試行し、続く場合はMWSの音声対応ネットワーク設定を確認してください。'
+            answer = ('音声の取得・確認、またはVC接続がタイムアウトしました。接続失敗後の退出であり、自動退出ではありません。'
+                      'MWSの音声対応ネットワーク・Discord音声サーバーへの通信（UDPを含む）を確認してください。終了処理はバックグラウンドで行います。')
         except (discord.DiscordException, OSError, RuntimeError):
             log.warning('Sound command failed (action=%s, guild_id=%s)', action, interaction.guild_id)
             answer = '音声再生に失敗しました。BotのVC権限、音声用ライブラリ、MWSの音声対応ネットワーク設定を確認してください。'
-        await interaction.edit_original_response(content=answer, allowed_mentions=discord.AllowedMentions.none())
+        await self.status(interaction, answer)
 
 
 def register_sound(bot):
@@ -232,7 +293,7 @@ def register_sound(bot):
     group = app_commands.Group(name='sound', description='VC内チャットで添付した音声ファイルを再生', guild_only=True)
 
     @group.command(name='play', description='このVCに参加して、添付した音声ファイルを再生します')
-    @app_commands.describe(file='再生する音声ファイル（25MB以内）')
+    @app_commands.describe(file='再生する音声ファイル・MP4動画（音声のみ／25MB以内）')
     async def play(interaction: discord.Interaction, file: discord.Attachment):
         await service.invoke(interaction, 'play', file)
 
