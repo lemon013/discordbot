@@ -749,6 +749,8 @@ from message_apps import register_message_apps
 register_message_apps(bot)
 from othello import register_othello
 register_othello(bot)
+from sound import register_sound
+register_sound(bot)
 
 from storage import register_backups
 register_backups(bot)
