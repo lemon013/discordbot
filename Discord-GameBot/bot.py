@@ -120,7 +120,8 @@ class Game:
 games: dict[int, Game] = {}
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='!', intents=intents,
+                   activity=discord.CustomActivity(name='✨made by ちょこもち'))
 
 def safe_name(user):
     return discord.utils.escape_markdown(getattr(user, 'display_name', user.name))
