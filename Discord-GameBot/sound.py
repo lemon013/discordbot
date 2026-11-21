@@ -51,8 +51,9 @@ async def verify_audio(executable, path):
 
 class UploadedAudio(discord.AudioSource):
     """Own the temporary directory until discord.py releases the audio source."""
-    def __init__(self, source, directory, finished):
+    def __init__(self, source, directory, finished, stderr=None):
         self.source, self.directory, self.finished = source, directory, finished
+        self.stderr = stderr
         self._cleanup_lock = threading.Lock()
         self._cleaned = False
 
@@ -71,9 +72,13 @@ class UploadedAudio(discord.AudioSource):
                 self.source.cleanup()
             finally:
                 try:
-                    self.directory.cleanup()
+                    if self.stderr is not None:
+                        self.stderr.close()
                 finally:
-                    self.finished(self)
+                    try:
+                        self.directory.cleanup()
+                    finally:
+                        self.finished(self)
 
 
 class Sound:
@@ -187,6 +192,7 @@ class Sound:
         executable = await asyncio.to_thread(ffmpeg_executable)
         directory = tempfile.TemporaryDirectory(prefix='discord-sound-')
         source = None
+        error_output = None
         started = False
         joined = False
         self.preparing.add(guild.id)
@@ -216,11 +222,14 @@ class Sound:
                 except RuntimeError:
                     pass  # Bot shutdown: the audio and temporary file are already released.
 
+            # discord.py expects a writable file object, not the integer DEVNULL
+            # sentinel: otherwise its stderr reader calls (-3).write(...) and fails.
+            error_output = open(os.devnull, 'wb')
             inner = discord.FFmpegOpusAudio(
                 str(path), executable=executable, bitrate=128,
                 before_options='-nostdin -protocol_whitelist file,pipe',
-                options='-vn -map 0:a:0', stderr=subprocess.DEVNULL)
-            source = UploadedAudio(inner, directory, cleanup_complete)
+                options='-vn -map 0:a:0', stderr=error_output)
+            source = UploadedAudio(inner, directory, cleanup_complete, stderr=error_output)
 
             def after(error):
                 if error:
@@ -237,6 +246,8 @@ class Sound:
                 if source:
                     source.cleanup()
                 else:
+                    if error_output is not None:
+                        error_output.close()
                     directory.cleanup()
                 if joined and voice:
                     completed = asyncio.get_running_loop().create_future()
