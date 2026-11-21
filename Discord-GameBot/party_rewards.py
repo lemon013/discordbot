@@ -20,6 +20,8 @@ class PartyRewards(ShopStore):
             if previous is not None:
                 return previous
             gems, xp = (100, 10) if won else (50, 5)
+            if game_id.startswith('othello:'):
+                gems, xp = gems * 3, xp * 3
             cfg_row = db.execute(f'SELECT * FROM {alias}.level_config WHERE guild_id=?', (guild_id,)).fetchone()
             cfg = {**DEFAULTS, **(dict(cfg_row) if cfg_row else {})}
             db.execute(f'INSERT OR IGNORE INTO {alias}.level_users(guild_id,user_id) VALUES(?,?)', (guild_id, user_id))
