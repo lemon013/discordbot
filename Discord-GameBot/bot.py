@@ -750,7 +750,9 @@ register_message_apps(bot)
 from othello import register_othello
 register_othello(bot)
 from sound import register_sound
-register_sound(bot)
+sound_service = register_sound(bot)
+from soundboard import register_soundboard
+register_soundboard(bot, sound_service)
 
 from storage import register_backups
 register_backups(bot)
