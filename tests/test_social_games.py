@@ -79,6 +79,44 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         await game.submit_hint(self.interaction(), '古い画面からの変更')
         self.assertEqual(game.hints, old)
 
+    async def test_duplicate_setting_is_host_only_and_locked_after_start(self):
+        game = self.game()
+        self.assertFalse(game.allow_duplicates)
+        await game.dispatch(self.interaction(2), 'duplicates')
+        self.assertFalse(game.allow_duplicates)
+        await game.dispatch(self.interaction(), 'duplicates')
+        self.assertTrue(game.allow_duplicates)
+        self.assertIn('同じ数字', str(game.embed().to_dict()))
+        with patch('social_games.RNG.choices', return_value=[42, 42]) as choose:
+            await game.dispatch(self.interaction(), 'start')
+        choose.assert_called_once_with(range(1, 101), k=2)
+        self.assertEqual(game.numbers, {1: 42, 2: 42})
+        await game.dispatch(self.interaction(), 'duplicates')
+        self.assertTrue(game.allow_duplicates)
+        game.hints = {1: 'りんご', 2: 'みかん'}
+        await game.dispatch(self.interaction(2), 'play')
+        await game.dispatch(self.interaction(), 'play')
+        self.assertEqual(game.outcomes, {1: True, 2: True})
+
+    async def test_equal_cards_still_cannot_skip_smaller_remaining_card(self):
+        game = self.game(count=3)
+        game.phase, game.allow_duplicates = 'ito', True
+        game.numbers, game.hints = {1: 42, 2: 42, 3: 10}, {1: 'a', 2: 'b', 3: 'c'}
+        await game.dispatch(self.interaction(), 'play')
+        self.assertEqual(game.outcomes, {1: False, 2: False, 3: False})
+
+    async def test_slash_option_sets_duplicate_mode(self):
+        bot = SimpleNamespace(tree=discord.app_commands.CommandTree(discord.Client(intents=discord.Intents.none())))
+        register_social_games(bot)
+        command = bot.tree.get_command('ito')
+        self.assertEqual(command.parameters[0].display_name, '数字の重複')
+        self.assertFalse(command.parameters[0].required)
+        interaction = self.interaction()
+        await command.callback(interaction, allow_duplicates=True)
+        game = interaction.edit_original_response.call_args.kwargs['view']
+        self.games.append(game)
+        self.assertTrue(game.allow_duplicates)
+
     async def test_ito_wrong_order_loses_and_cancellation_has_no_rewards(self):
         game = self.game()
         game.phase, game.numbers, game.hints = 'ito', {1: 3, 2: 90}, {1: '虫', 2: '竜'}
