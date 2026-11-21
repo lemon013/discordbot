@@ -745,6 +745,8 @@ bot.party_rewards = PartyRewards()
 register_guess(bot)
 from social_games import register_social_games
 register_social_games(bot)
+from message_apps import register_message_apps
+register_message_apps(bot)
 
 from storage import register_backups
 register_backups(bot)
