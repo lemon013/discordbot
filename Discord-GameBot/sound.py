@@ -1,12 +1,18 @@
 """Play an attached audio file in the voice channel containing its command."""
 import asyncio
 import importlib
+import io
 import logging
+import math
 import os
 from pathlib import Path
 import subprocess
+import struct
 import tempfile
 import threading
+import wave
+from types import SimpleNamespace
+from importlib.metadata import version, PackageNotFoundError
 
 import discord
 from discord import app_commands
@@ -14,11 +20,41 @@ from discord import app_commands
 log = logging.getLogger(__name__)
 MAX_BYTES = 25 * 1024 * 1024
 CONNECT_TIMEOUT = 20
+DAVE_READY_TIMEOUT = 10
 EXTENSIONS = {'.mp3', '.wav', '.ogg', '.opus', '.m4a', '.aac', '.flac', '.webm', '.mp4'}
 
 
 class SoundError(Exception):
     pass
+
+
+def make_test_tone():
+    """Three seconds of moderate-volume 440 Hz audio, independent of user files."""
+    buffer = io.BytesIO()
+    with wave.open(buffer, 'wb') as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(48000)
+        audio.writeframes(b''.join(struct.pack('<h', int(8000 * math.sin(2 * math.pi * 440 * n / 48000)
+            * min(1, n / 960, (144000 - n) / 960))) for n in range(144000)))
+    data = buffer.getvalue()
+    async def save(path):
+        return await asyncio.to_thread(Path(path).write_bytes, data)
+    return SimpleNamespace(filename='sound-test-440Hz.wav', size=len(data), save=save)
+
+
+async def wait_for_voice_encryption(voice):
+    """Do not start media before the SDK has negotiated its required DAVE keys."""
+    state = getattr(voice, '_connection', None)
+    if state is None:
+        return
+    deadline = asyncio.get_running_loop().time() + DAVE_READY_TIMEOUT
+    while getattr(state, 'dave_protocol_version', 0) > 0 and not state.can_encrypt:
+        if not voice.is_connected():
+            raise SoundError('暗号化の準備中にVC接続が切れました。')
+        if asyncio.get_running_loop().time() >= deadline:
+            raise SoundError('VCには接続しましたが、音声の暗号化（DAVE）の準備が完了しませんでした。/sound status の診断結果を確認してください。')
+        await asyncio.sleep(0.1)
 
 
 def ffmpeg_executable():
@@ -56,9 +92,25 @@ class UploadedAudio(discord.AudioSource):
         self.stderr = stderr
         self._cleanup_lock = threading.Lock()
         self._cleaned = False
+        self.frames = self.audio_bytes = self.skipped_headers = 0
+        self.guild_id = None
+        self.playback_error = None
 
     def read(self):
-        return self.source.read()
+        data = self.source.read()
+        while data.startswith((b'OpusHead', b'OpusTags')):
+            self.skipped_headers += 1
+            data = self.source.read()
+        if data:
+            self.frames += 1
+            self.audio_bytes += len(data)
+            if self.frames == 1:
+                log.info('Sound audio frames started (guild_id=%s)', self.guild_id)
+        return data
+
+    @property
+    def _current_error(self):
+        return getattr(self.source, '_current_error', None)
 
     def is_opus(self):
         return self.source.is_opus()
@@ -86,6 +138,7 @@ class Sound:
         self.bot = bot
         self.locks, self.playing, self.idle_tasks = {}, {}, {}
         self.preparing, self.connecting = set(), {}
+        self.last_stats = {}
 
     def lock(self, guild_id):
         return self.locks.setdefault(guild_id, asyncio.Lock())
@@ -152,8 +205,31 @@ class Sound:
             if self.playing.get(guild.id) is not source:
                 return
             self.playing.pop(guild.id, None)
+            self.last_stats[guild.id] = (source.frames, source.audio_bytes, source.skipped_headers, source.playback_error)
+            log.info('Sound audio completed (guild_id=%s, frames=%s, bytes=%s, skipped_headers=%s, error=%s)',
+                     guild.id, *self.last_stats[guild.id])
             self.cancel_idle(guild.id)
             self.idle_tasks[guild.id] = asyncio.create_task(self.idle_disconnect(guild))
+
+    def playback_status(self, guild):
+        voice = guild.voice_client
+        state = getattr(voice, '_connection', None)
+        required = getattr(state, 'dave_protocol_version', 0) > 0
+        encryption = ('準備済み' if getattr(state, 'can_encrypt', False) else '準備未完了') if required else 'DAVE不要または情報なし'
+        source = self.playing.get(guild.id)
+        stats = ((source.frames, source.audio_bytes, source.skipped_headers, source.playback_error)
+                 if source else self.last_stats.get(guild.id, (0, 0, 0, None)))
+        dependencies = []
+        for package in ('discord.py', 'davey'):
+            try:
+                dependencies.append(f'{package}={version(package)}')
+            except PackageNotFoundError:
+                dependencies.append(f'{package}=未導入')
+        return (f'VC接続：{"接続済み" if voice and voice.is_connected() else "未接続"}\n'
+                f'DAVE暗号化：{encryption}\n'
+                f'{"再生中" if source else "直近の再生"}：読込 {stats[0]}フレーム／{stats[1]}バイト\n'
+                f'除外したヘッダー：{stats[2]}／再生エラー：{stats[3] or "なし"}\n'
+                + '、'.join(dependencies) + '\n※読込数は参加者への到達・聴取を保証するものではありません。')
 
     async def idle_disconnect(self, guild):
         try:
@@ -214,6 +290,8 @@ class Sound:
                 await self.status(interaction, '🔊 VCに接続しています（最大20秒）。')
                 voice = await self.connect_voice(guild, channel)
                 joined = True
+            await self.status(interaction, '🔐 音声の暗号化準備を確認しています。')
+            await wait_for_voice_encryption(voice)
             loop = asyncio.get_running_loop()
 
             def cleanup_complete(audio):
@@ -228,14 +306,19 @@ class Sound:
             inner = discord.FFmpegOpusAudio(
                 str(path), executable=executable, bitrate=128,
                 before_options='-nostdin -protocol_whitelist file,pipe',
-                options='-vn -map 0:a:0', stderr=error_output)
+                options='-vn -map 0:a:0 -frame_duration 20 -application audio', stderr=error_output)
             source = UploadedAudio(inner, directory, cleanup_complete, stderr=error_output)
+            source.guild_id = guild.id
 
             def after(error):
                 if error:
+                    source.playback_error = type(error).__name__
                     log.warning('Voice playback failed (guild_id=%s, error_type=%s)', guild.id, type(error).__name__)
 
             self.playing[guild.id] = source
+            log.info('Sound playback starting (guild_id=%s, dave_required=%s, dave_ready=%s)', guild.id,
+                     getattr(getattr(voice, '_connection', None), 'dave_protocol_version', 0) > 0,
+                     bool(getattr(getattr(voice, '_connection', None), 'can_encrypt', False)))
             self.cancel_idle(guild.id)
             voice.play(source, after=after)
             started = True
@@ -262,15 +345,20 @@ class Sound:
     async def invoke(self, interaction, action, attachment=None):
         # Resolve Discord's "thinking" indicator before file/network preparation.
         await interaction.response.send_message(
-            '音声の準備を始めます。' if action == 'play' else '音声の操作を受け付けました。',
+            '音声の準備を始めます。' if action in ('play', 'test') else '音声の操作を受け付けました。',
             ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
         try:
             channel = self.target(interaction)
+            if action == 'status':
+                await self.status(interaction, self.playback_status(interaction.guild))
+                return
             lock = self.lock(interaction.guild.id)
             if lock.locked():
                 raise SoundError('音声の準備・操作中です。表示が更新されるまでお待ちください。')
             async with lock:
-                if action == 'play':
+                if action in ('play', 'test'):
+                    if action == 'test':
+                        attachment = await asyncio.to_thread(make_test_tone)
                     answer = await self.play(interaction, channel, attachment)
                 else:
                     voice = interaction.guild.voice_client
@@ -315,6 +403,14 @@ def register_sound(bot):
     @group.command(name='leave', description='BotをこのVCから退出させます')
     async def leave(interaction: discord.Interaction):
         await service.invoke(interaction, 'leave')
+
+    @group.command(name='test', description='このVCで3秒間のテスト音を再生します')
+    async def test(interaction: discord.Interaction):
+        await service.invoke(interaction, 'test')
+
+    @group.command(name='status', description='音声の読込フレーム数と暗号化の状態を確認します')
+    async def status(interaction: discord.Interaction):
+        await service.invoke(interaction, 'status')
 
     bot.tree.add_command(group)
     return service
