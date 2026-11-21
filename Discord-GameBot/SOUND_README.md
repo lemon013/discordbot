@@ -25,3 +25,5 @@ MWS側でDiscordの音声接続（UDPなど）が許可されている必要が�
 ログの「Voice handshake complete. Endpoint found」は音声サーバーの接続先が見つかった段階です。その後の「Voice connection complete.」より前に「Timed out connecting to voice」が出る場合、音声接続は成立していません。再生後の自動退出ではなく、接続失敗後に退出しています。接続先の取得が成功しただけでは、UDPを含む音声通信が通ることは確認できません。
 
 コマンド結果は実行者だけに表示されますが、音声はVCの参加者に聞こえます。添付音声はFFmpegで処理し、Gemini APIには送信しません。
+
+`discord.player: Write error ... AttributeError: 'int' object has no attribute 'write'` はFFmpegのエラー出力先の指定に起因する不具合でした。再生用FFmpegには書き込み可能なファイルオブジェクトを渡し、再生終了時に閉じるよう修正しています。Botの緑の発話表示だけでは音声データが参加者まで正常に届いていることは確認できません。
