@@ -133,7 +133,7 @@ class Othello(discord.ui.View):
                 + f'\n2連続置き：各プレイヤー **{self.double_uses}回**（0回なら通常ルール）\n'
                 + f'解禁：**{self.unlock_turn}ターン目**から（黒白合計の手数）\n'
                 '相手が「参加」を押したら、募集主が開始してください。先手・後手はランダムです。\n'
-                '完走時：勝利100ジュエル＋10XP／敗北・引き分け50ジュエル＋5XP。\n'
+                '完走時：勝利300ジュエル＋30XP／敗北・引き分け150ジュエル＋15XP。\n'
                 '投了・中止・時間切れは報酬なし。')
         else:
             moves = legal_moves(self.cells, self.turn) if self.phase == 'playing' else {}
@@ -167,7 +167,7 @@ class Othello(discord.ui.View):
                 if self.outcomes is not None:
                     embed.add_field(name='報酬（未処理あり：再試行してください）' if self.rewards_pending else '報酬',
                                     value='\n'.join(name(self.players[uid]) + '：' +
-                                        ('100ジュエル＋10XP' if won else '50ジュエル＋5XP')
+                                        ('300ジュエル＋30XP' if won else '150ジュエル＋15XP')
                                         for uid, won in self.outcomes.items()), inline=False)
         if self.deadline:
             embed.set_footer(text='募集5分／1手3分。Bot再起動で対局は終了します。')
