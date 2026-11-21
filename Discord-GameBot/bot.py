@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -120,8 +120,27 @@ class Game:
 games: dict[int, Game] = {}
 intents = discord.Intents.default()
 intents.message_content = True
+STATUS_MESSAGES = (
+    '✨made by ちょこもち！',
+    '🤔メンションして聞いてね！',
+    '💬話してレベルアップ！',
+    '🤔メンションして聞いてね！',
+    '🏆目指せ全知全能bot！',
+    '🤔メンションして聞いてね！',
+    '💎ジュエルを稼いで特典GET！',
+    '🤔メンションして聞いてね！',
+    '✅powered by MWS！',
+    '🤔メンションして聞いてね！',
+)
 bot = commands.Bot(command_prefix='!', intents=intents,
-                   activity=discord.CustomActivity(name='✨made by ちょこもち'))
+                   activity=discord.CustomActivity(name=STATUS_MESSAGES[0]))
+
+
+@tasks.loop(seconds=5)
+async def rotate_status():
+    await bot.wait_until_ready()
+    text = STATUS_MESSAGES[rotate_status.current_loop % len(STATUS_MESSAGES)]
+    await bot.change_presence(activity=discord.CustomActivity(name=text))
 
 def safe_name(user):
     return discord.utils.escape_markdown(getattr(user, 'display_name', user.name))
@@ -479,6 +498,8 @@ async def on_message(message):
 @bot.event
 async def on_ready():
     log.info('Logged in as %s', bot.user)
+    if not rotate_status.is_running():
+        rotate_status.start()
     if CLOUD_MODE and (not hasattr(bot, '_minecraft_sync_task') or bot._minecraft_sync_task.done()):
         import asyncio
         from snapshot_sync import sync_loop
