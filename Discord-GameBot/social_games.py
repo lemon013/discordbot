@@ -83,7 +83,7 @@ class VoteSelect(discord.ui.Select):
 
 
 class SocialGame(discord.ui.View):
-    def __init__(self, bot, interaction, registry, kind):
+    def __init__(self, bot, interaction, registry, kind, allow_duplicates=False):
         super().__init__(timeout=None)
         self.bot, self.guild, self.channel = bot, interaction.guild, interaction.channel
         self.registry, self.kind = registry, kind
@@ -91,6 +91,7 @@ class SocialGame(discord.ui.View):
         self.players = {self.host: interaction.user}
         self.minimum, self.maximum = (2, 10) if kind == 'ito' else (4, 8)
         self.phase = 'lobby'
+        self.allow_duplicates = allow_duplicates
         self.game_id = f'{kind}:{uuid.uuid4().hex}'
         self.topic = ''
         self.numbers, self.hints, self.votes = {}, {}, {}
@@ -121,6 +122,8 @@ class SocialGame(discord.ui.View):
         }.get(self.phase, [])
         for action, label in actions:
             self.add_item(Action(self, action, label, discord.ButtonStyle.primary))
+        if self.kind == 'ito' and self.phase == 'lobby':
+            self.add_item(Action(self, 'duplicates', '数字の重複：' + ('あり' if self.allow_duplicates else 'なし')))
         if self.phase not in ('finished', 'cancelled', 'settling'):
             self.add_item(Action(self, 'cancel', '中止（募集主）', discord.ButtonStyle.danger))
         if self.phase == 'finished' and self.rewards_pending:
@@ -161,6 +164,8 @@ class SocialGame(discord.ui.View):
                 reward_text = '\n'.join(f'{clean(self.players[uid].display_name)}：'
                     + ('100ジュエル＋10XP' if won else '50ジュエル＋5XP') for uid, won in self.outcomes.items())
                 embed.add_field(name='報酬（一部未処理：再試行が必要）' if self.rewards_pending else '報酬', value=reward_text, inline=False)
+        if self.kind == 'ito' and self.phase in ('lobby', 'ito'):
+            embed.add_field(name='数字の重複', value='あり（同じ数字はどちらが先でもOK）' if self.allow_duplicates else 'なし', inline=False)
         if self.deadline and self.phase not in ('finished', 'cancelled', 'settling'):
             embed.set_footer(text='秘密の情報は本人だけに表示されます。')
             embed.add_field(name='この段階の締切', value=f'<t:{int(self.deadline.timestamp())}:R>', inline=False)
@@ -281,7 +286,7 @@ class SocialGame(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         async with self.lock:
             reply = ''
-            if action in ('start', 'begin', 'correct', 'voting', 'cancel', 'retry') and uid != self.host:
+            if action in ('start', 'begin', 'correct', 'voting', 'cancel', 'retry', 'duplicates') and uid != self.host:
                 reply = '募集主（インサイダーではマスター）だけが操作できます。'
             elif action == 'join' and self.phase == 'lobby':
                 if uid == self.host:
@@ -293,11 +298,17 @@ class SocialGame(discord.ui.View):
                 else:
                     self.players[uid] = interaction.user; reply = '参加しました。'
                 await self.update()
+            elif action == 'duplicates' and self.kind == 'ito' and self.phase == 'lobby':
+                self.allow_duplicates = not self.allow_duplicates
+                await self.update()
+                reply = '数字の重複を「' + ('あり' if self.allow_duplicates else 'なし') + '」に変更しました。'
             elif action == 'start' and self.phase == 'lobby':
                 if len(self.players) < self.minimum:
                     reply = f'{self.minimum}人以上で開始できます。'
                 elif self.kind == 'ito':
-                    self.numbers = dict(zip(self.players, RNG.sample(range(1, 101), len(self.players))))
+                    values = (RNG.choices(range(1, 101), k=len(self.players)) if self.allow_duplicates
+                              else RNG.sample(range(1, 101), len(self.players)))
+                    self.numbers = dict(zip(self.players, values))
                     self.topic, self.phase = RNG.choice(ITO_TOPICS), 'ito'
                     self.arm(600); await self.update(); reply = '開始！自分の数字を確認し、ヒントを入力してください。'
                 else:
@@ -356,14 +367,14 @@ class SocialGame(discord.ui.View):
 def register_social_games(bot):
     games = {}
 
-    async def open_game(interaction, kind):
+    async def open_game(interaction, kind, allow_duplicates=False):
         await interaction.response.defer(thinking=True)
         if interaction.guild_id in games:
             game = games[interaction.guild_id]
             await interaction.edit_original_response(content=f'このサーバーでは {game.kind} が進行中です。' +
                 (f'\n{game.board.jump_url}' if game.board else ''), allowed_mentions=discord.AllowedMentions.none())
             return
-        game = SocialGame(bot, interaction, games, kind)
+        game = SocialGame(bot, interaction, games, kind, allow_duplicates)
         games[interaction.guild_id] = game
         try:
             game.board = await interaction.edit_original_response(embed=game.embed(), view=game, allowed_mentions=discord.AllowedMentions.none())
@@ -373,8 +384,10 @@ def register_social_games(bot):
 
     @bot.tree.command(name='ito', description='秘密の数字を言葉で例えて、小さい順に並べる協力ゲーム')
     @app_commands.guild_only()
-    async def ito(interaction: discord.Interaction):
-        await open_game(interaction, 'ito')
+    @app_commands.describe(allow_duplicates='同じ数字を複数人に配ることを許可する（初期値：なし）')
+    @app_commands.rename(allow_duplicates='数字の重複')
+    async def ito(interaction: discord.Interaction, allow_duplicates: bool = False):
+        await open_game(interaction, 'ito', allow_duplicates)
 
     @bot.tree.command(name='insider', description='お題を当てた後、答えを知って誘導したインサイダーを探そう')
     @app_commands.guild_only()
