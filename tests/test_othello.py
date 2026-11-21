@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 import random
 import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -11,6 +12,9 @@ from discord.ext import commands
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'Discord-GameBot'))
 from othello import Othello, coordinate, flips, legal_moves, new_board, register_othello
+from casino import CasinoStore
+from leveling import LevelStore
+from party_rewards import PartyRewards, reward_party as actual_reward_party
 
 
 def interaction(uid=10, channel=2):
@@ -251,6 +255,35 @@ class GameTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rewards.call_args.args, first)
         await self.game.dispatch(interaction(), 'retry')
         self.assertEqual(self.rewards.await_count, 2)
+
+    async def test_triple_rewards_credit_wallet_and_xp_once_and_preserve_other_games(self):
+        self.assertIn('300ジュエル＋30XP', self.game.embed().description)
+        await self.start_game()
+        with tempfile.TemporaryDirectory() as directory:
+            casino = CasinoStore(Path(directory) / 'casino.sqlite3')
+            levels = LevelStore(Path(directory) / 'levels.sqlite3')
+            store = PartyRewards(casino, levels)
+            self.game.bot.party_rewards = store
+            self.game.bot.leveling_service = SimpleNamespace(notify=AsyncMock(
+                side_effect=[RuntimeError('notification failed'), None, None]))
+            with patch('othello.reward_party', new=actual_reward_party):
+                with self.assertLogs('othello', level='ERROR'):
+                    await self.game.finish('winner', {10:True, 20:False})
+                self.assertTrue(self.game.rewards_pending)
+                self.assertEqual(casino.balance(1,10), 300)
+                await self.game.dispatch(interaction(), 'retry')
+            self.assertFalse(self.game.rewards_pending)
+            for uid, gems, xp in ((10,300,30),(20,150,15)):
+                self.assertEqual(casino.balance(1,uid), gems)
+                self.assertEqual(levels.rank(1,uid)[0]['xp'], xp)
+            self.assertIn('150ジュエル＋15XP', str(self.game.embed().to_dict()))
+            for uid, game_id, won, gems, xp in ((30,'ito:unchanged',True,100,10),
+                                               (40,'insider:unchanged',False,50,5),
+                                               (50,'othello:draw',False,150,15)):
+                store.grant(1,uid,game_id,won)
+                store.grant(1,uid,game_id,won)
+                self.assertEqual(casino.balance(1,uid), gems)
+                self.assertEqual(levels.rank(1,uid)[0]['xp'], xp)
 
     async def test_deleted_board_releases_game(self):
         self.game.board.edit.side_effect = discord.NotFound(SimpleNamespace(status=404, reason='deleted'), 'gone')
