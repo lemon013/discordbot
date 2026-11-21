@@ -1,8 +1,8 @@
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, create_autospec, patch
 
 import discord
 from discord.ext import commands
@@ -103,7 +103,21 @@ class MessageAppsTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('高専への適性を必ずお約束するものではありません', reply.args[0])
             self.assertFalse(reply.kwargs['mention_author'])
             self.assertFalse(reply.kwargs['allowed_mentions'].everyone)
-            self.assertTrue(reply.kwargs['fail_if_not_exists'])
+            self.assertNotIn('fail_if_not_exists', reply.kwargs)
+
+    async def test_aptitude_uses_real_reply_with_supported_send_arguments(self):
+        # Exercise discord.py's forwarding code; a permissive AsyncMock hid this bug.
+        channel = create_autospec(discord.abc.Messageable, instance=True)
+        self.message.channel = channel
+        self.message.reply = MethodType(discord.Message.reply, self.message)
+        call = interaction()
+        await self.command('高専適正度').callback(call, self.message)
+        channel.send.assert_awaited_once()
+        kwargs = channel.send.call_args.kwargs
+        self.assertIs(kwargs['reference'], self.message)
+        self.assertFalse(kwargs['mention_author'])
+        self.assertFalse(kwargs['allowed_mentions'].everyone)
+        self.assertIn('返信しました', call.edit_original_response.call_args.kwargs['content'])
 
     async def test_deleted_message_reply_fails_privately(self):
         self.message.reply.side_effect = discord.NotFound(SimpleNamespace(status=404, reason='Not Found'), 'deleted')
