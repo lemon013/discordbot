@@ -1,6 +1,8 @@
 import asyncio
+import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -29,7 +31,7 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
         self.guild = SimpleNamespace(id=1, me=object(), voice_client=None)
         self.call = SimpleNamespace(guild=self.guild, guild_id=1, channel=self.channel,
             user=SimpleNamespace(voice=SimpleNamespace(channel=self.channel)),
-            response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock())
+            response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()), edit_original_response=AsyncMock())
         self.file = SimpleNamespace(filename='test.wav', size=4)
         async def save(path):
             Path(path).write_bytes(b'test')
@@ -49,14 +51,17 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
         await asyncio.sleep(0)
         tasks = list(self.service.idle_tasks.values())
+        tasks += list(self.service.connecting.values())
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def test_play_attachment_joins_and_encodes_to_opus(self):
         await self.service.invoke(self.call, 'play', self.file)
-        self.call.response.defer.assert_awaited_once_with(thinking=True, ephemeral=True)
-        self.channel.connect.assert_awaited_once_with(timeout=20, reconnect=True, self_deaf=True)
+        self.call.response.defer.assert_not_awaited()
+        self.call.response.send_message.assert_awaited_once()
+        self.assertTrue(self.call.response.send_message.call_args.kwargs['ephemeral'])
+        self.channel.connect.assert_awaited_once_with(timeout=20, reconnect=False, self_deaf=True)
         source = self.voice.play.call_args.args[0]
         self.assertIsInstance(source, UploadedAudio)
         self.assertTrue(source.is_opus())
@@ -129,13 +134,61 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
             raise asyncio.TimeoutError()
         self.channel.connect.side_effect = connect
         await self.service.invoke(self.call, 'play', self.file)
+        await asyncio.gather(*list(self.service.connecting.values()), return_exceptions=True)
         self.voice.disconnect.assert_awaited_once_with(force=True)
         self.assertFalse(self.service.playing)
         self.assertIn('タイムアウト', self.call.edit_original_response.call_args.kwargs['content'])
 
+    async def test_timeout_reply_does_not_wait_for_slow_sdk_cleanup(self):
+        cleanup_gate = asyncio.Event()
+        async def connect(**kwargs):
+            self.guild.voice_client = self.voice
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await cleanup_gate.wait()
+                raise
+        self.channel.connect.side_effect = connect
+        try:
+            with patch('sound.CONNECT_TIMEOUT', 0.01):
+                await asyncio.wait_for(self.service.invoke(self.call, 'play', self.file), timeout=2)
+            self.assertIn('タイムアウト', self.call.edit_original_response.call_args.kwargs['content'])
+            self.assertIn(1, self.service.connecting)
+            self.voice.disconnect.assert_not_awaited()
+            await self.service.invoke(self.call, 'play', self.file)
+            self.assertIn('終了処理中', self.call.edit_original_response.call_args.kwargs['content'])
+            self.channel.connect.assert_awaited_once()
+        finally:
+            cleanup_gate.set()
+            await asyncio.gather(*list(self.service.connecting.values()), return_exceptions=True)
+        self.assertFalse(self.service.connecting)
+
+    async def test_initial_status_precedes_download_and_old_idle_timer_is_cancelled(self):
+        self.guild.voice_client = self.voice
+        old_timer = asyncio.create_task(self.service.idle_disconnect(self.guild))
+        self.service.idle_tasks[1] = old_timer
+        async def save(path):
+            self.call.response.send_message.assert_awaited_once()
+            self.call.response.defer.assert_not_awaited()
+            self.assertIn(1, self.service.preparing)
+            self.assertNotIn(1, self.service.idle_tasks)
+            Path(path).write_bytes(b'test')
+        self.file.save.side_effect = save
+        await self.service.invoke(self.call, 'play', self.file)
+        await asyncio.gather(old_timer, return_exceptions=True)
+        self.voice.disconnect.assert_not_awaited()
+        self.assertFalse(self.service.preparing)
+
+    async def test_busy_sound_command_replies_instead_of_waiting_on_guild_lock(self):
+        async with self.service.lock(1):
+            await asyncio.wait_for(self.service.invoke(self.call, 'play', self.file), timeout=1)
+        self.assertIn('準備・操作中', self.call.edit_original_response.call_args.kwargs['content'])
+        self.file.save.assert_not_awaited()
+
     async def test_play_failure_releases_file_source_and_new_voice_connection(self):
         self.voice.play.side_effect = RuntimeError('cannot play')
         await self.service.invoke(self.call, 'play', self.file)
+        await asyncio.gather(*list(self.service.connecting.values()), return_exceptions=True)
         self.inner.cleanup.assert_called_once()
         self.voice.disconnect.assert_awaited_once_with(force=True)
         self.assertFalse(self.service.playing)
@@ -210,6 +263,53 @@ class SoundTests(unittest.IsolatedAsyncioTestCase):
         finally:
             source.cleanup()
         self.assertFalse(path.exists())
+
+    async def make_mp4(self, path, audio):
+        try:
+            executable = ffmpeg_executable()
+        except SoundError:
+            self.skipTest('Install voice and FFmpeg requirements for MP4 integration tests')
+        args = [executable, '-nostdin', '-y', '-v', 'error', '-f', 'lavfi',
+                '-i', 'color=c=black:s=16x16:r=10']
+        if audio:
+            args += ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono']
+        args += ['-t', '0.2', '-c:v', 'mpeg4']
+        args += ['-c:a', 'aac'] if audio else ['-an']
+        process = await asyncio.create_subprocess_exec(*args, str(path), stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
+        self.assertEqual(await asyncio.wait_for(process.wait(), timeout=15), 0)
+
+    async def test_real_mp4_plays_audio_only(self):
+        self.file.filename = 'clip.MP4'
+        async def save(path):
+            await self.make_mp4(path, audio=True)
+        self.file.save.side_effect = save
+        with patch('sound.ffmpeg_executable', new=ffmpeg_executable), \
+             patch('sound.verify_audio', new=verify_audio), \
+             patch('sound.discord.FFmpegOpusAudio', new=REAL_FFMPEG_OPUS_AUDIO):
+            await self.service.invoke(self.call, 'play', self.file)
+        self.assertIn('再生しています', self.call.edit_original_response.call_args.kwargs['content'])
+        source = self.service.playing[1]
+        try:
+            packets = await asyncio.wait_for(asyncio.to_thread(lambda: list(iter(source.read, b''))), timeout=15)
+            self.assertTrue(packets)
+            self.assertTrue(source.is_opus())
+        finally:
+            source.cleanup()
+
+    async def test_mp4_without_audio_is_rejected_before_joining(self):
+        self.file.filename = 'silent.mp4'
+        paths = []
+        async def save(path):
+            paths.append(Path(path).parent)
+            await self.make_mp4(path, audio=False)
+        self.file.save.side_effect = save
+        with patch('sound.ffmpeg_executable', new=ffmpeg_executable), \
+             patch('sound.verify_audio', new=verify_audio):
+            await self.service.invoke(self.call, 'play', self.file)
+        self.channel.connect.assert_not_awaited()
+        self.assertIn('音声を読み取れません', self.call.edit_original_response.call_args.kwargs['content'])
+        self.assertFalse(paths[0].exists())
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
