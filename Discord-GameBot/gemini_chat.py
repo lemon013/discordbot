@@ -1,4 +1,4 @@
-"""Opt-in Gemini chat. No API requests are made until a user asks a question."""
+"""Fixed-persona AI chat using Gemini or Groq; no API requests at startup."""
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +16,7 @@ import unicodedata
 import aiohttp
 import discord
 from discord import app_commands
+from groq_api import MODELS as GROQ_MODELS, DEFAULT_MODEL as GROQ_DEFAULT_MODEL
 
 API_ROOT = 'https://generativelanguage.googleapis.com/v1beta'
 SYSTEM_INSTRUCTION = '''あなたは「ぐりーんの鯖！」のマスコットキャラクター「シフォン」です。
@@ -98,7 +99,7 @@ def chiffon_answer(answer: str) -> tuple[str, bool]:
 
 
 HELP = (
-    '**シフォン（Gemini AI）**\n'
+    '**シフォン（AI）**\n'
     '`/ai chat 質問` または `@Bot 質問`\n'
     '`/ai settings` 現在の設定\n'
     '`/ai models` 利用可能なモデル一覧（無料とは限りません）\n'
@@ -108,7 +109,7 @@ HELP = (
     'キャラ設定はシフォン専用で固定されています。`/ai prompt` では変更できません。\n'
     '`/ai reasoning auto|off|minimal|low|medium|high`\n'
     '思考設定の対応範囲はモデルにより異なります。\n'
-    'AIへの質問と直近の会話履歴はGoogleに送信されます。'
+    'AIへの質問と直近の会話履歴は、設定した接続先（GoogleまたはGroq）に送信されます。'
 )
 log = logging.getLogger(__name__)
 
@@ -117,11 +118,23 @@ class AIError(Exception):
     """A message that is safe to show in Discord (never raw API errors)."""
 
 
+def active_provider():
+    provider = os.getenv('AI_PROVIDER', '').strip().lower()
+    provider = provider or ('groq' if os.getenv('GROQ_API_KEY', '').strip() else 'gemini')
+    if provider not in ('gemini', 'groq'):
+        raise AIError('AI_PROVIDER は groq または gemini に設定してください。')
+    return provider
+
+
 def thinking_config(model: str, level: str) -> dict:
     if level not in ('auto', 'off', 'minimal', 'low', 'medium', 'high'):
         raise AIError('思考レベルは auto / off / minimal / low / medium / high から選んでください。')
     if level == 'auto':
         return {}
+    if model in GROQ_MODELS:
+        if level not in ('low', 'medium', 'high'):
+            raise AIError('Groq GPT-OSSの思考設定は auto / low / medium / high から選んでください。')
+        return {'reasoning_effort': level}
     if model.startswith('gemini-2.5-'):
         if level == 'off' and 'pro' in model:
             raise AIError('Gemini 2.5 Proでは思考をoffにできません。auto または low以上を選んでください。')
@@ -169,10 +182,19 @@ class GeminiChat:
 
     def settings(self, guild_id):
         saved = self.config.get(str(guild_id), {})
+        provider = active_provider()
+        model = (os.getenv('GROQ_MODEL', GROQ_DEFAULT_MODEL) if provider == 'groq'
+                 else os.getenv('GEMINI_MODEL', 'gemini-2.5-flash'))
+        if provider == 'groq' and model not in GROQ_MODELS:
+            raise AIError('GROQ_MODEL は openai/gpt-oss-20b または openai/gpt-oss-120b に設定してください。')
+        # Changing provider also replaces incompatible saved model/reasoning values.
+        compatible = (saved.get('model') in GROQ_MODELS if provider == 'groq'
+                      else str(saved.get('model', '')).startswith('gemini-'))
         return {
-            'model': os.getenv('GEMINI_MODEL', 'gemini-2.5-flash'),
+            'provider': provider,
+            'model': model,
             'reasoning': 'auto',
-            **{key: saved[key] for key in ('model', 'reasoning') if key in saved},
+            **{key: saved[key] for key in ('model', 'reasoning') if compatible and key in saved},
             'prompt': SYSTEM_INSTRUCTION,
         }
 
@@ -190,6 +212,13 @@ class GeminiChat:
                 del self.history[key]
 
     async def request(self, method, endpoint, payload=None):
+        if (endpoint.startswith('/models/openai/gpt-oss-') or
+                (method == 'GET' and active_provider() == 'groq')):
+            from groq_api import request as groq_request, GroqError
+            try:
+                return await groq_request(method, endpoint, payload, self.api_slots)
+            except GroqError as exc:
+                raise AIError(str(exc)) from None
         api_key = os.getenv('GEMINI_API_KEY', '').strip()
         if not api_key:
             raise AIError('Gemini APIキーが未設定です。Botの環境変数または Discord-GameBot/.env に GEMINI_API_KEY を設定してBotを再起動してください。')
@@ -306,7 +335,7 @@ class GeminiChat:
             await self.chat(message, value)
         elif action == 'settings':
             s = self.settings(message.guild.id)
-            await self.send(message, f"モデル：`{s['model']}`\n思考レベル：`{s['reasoning']}`\nキャラクター：シフォン（固定・変更不可）\n\n会話履歴：チャンネル・ユーザーごと、最大6往復・1時間。Bot再起動で消去。")
+            await self.send(message, f"接続先：`{s['provider']}`\nモデル：`{s['model']}`\n思考レベル：`{s['reasoning']}`（Groqのautoはlow）\nキャラクター：シフォン（固定・変更不可）\n\n会話履歴：チャンネル・ユーザーごと、最大6往復・1時間。Bot再起動で消去。")
         elif action == 'models':
             models = await self.models()
             await self.send(message, '**利用可能なモデル（無料とは限りません）**\n' + '\n'.join(f'`{model}`' for model in models))
@@ -327,7 +356,9 @@ class GeminiChat:
             s = self.settings(message.guild.id)
             if action == 'model':
                 model = value.removeprefix('models/')
-                if not re.fullmatch(r'gemini-[A-Za-z0-9.\-]{1,100}', model):
+                if s['provider'] == 'groq' and model not in GROQ_MODELS:
+                    raise AIError('GroqのモデルIDは openai/gpt-oss-20b / openai/gpt-oss-120b です。')
+                if s['provider'] == 'gemini' and not re.fullmatch(r'gemini-[A-Za-z0-9.\-]{1,100}', model):
                     raise AIError('正しいGeminiモデルIDを指定してください。/ai models で確認できます。')
                 s['model'], s['reasoning'] = model, 'auto'
             else:
@@ -380,7 +411,7 @@ class GeminiChat:
 
 def register_gemini(bot):
     service = GeminiChat(bot)
-    group = app_commands.Group(name='ai', description='シフォンと会話・Gemini AIの設定', guild_only=True)
+    group = app_commands.Group(name='ai', description='シフォンと会話・AIの設定', guild_only=True)
 
     @group.command(name='chat', description='シフォンとお話しします')
     @app_commands.describe(question='AIに聞きたいこと')
@@ -401,7 +432,7 @@ def register_gemini(bot):
 
     @group.command(name='model', description='AIモデルを変更します（サーバー管理者）')
     @app_commands.default_permissions(manage_guild=True)
-    @app_commands.describe(model='GeminiモデルID')
+    @app_commands.describe(model='接続先に対応するモデルID（Groq例：openai/gpt-oss-20b）')
     async def ai_model(interaction: discord.Interaction, model: str):
         await service.invoke(interaction, 'model', model)
 

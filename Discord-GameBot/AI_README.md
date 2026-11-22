@@ -1,6 +1,26 @@
-# シフォン専用 Gemini AIチャット
+# シフォン専用 AIチャット（Groq / Gemini）
 
-## 最初の設定
+## Groqの GPT-OSS 20B に切り替える
+
+MWSの環境変数、またはPCの `Discord-GameBot/.env` に次を設定し、Botを再起動します。実際のキーはDiscordのチャットやGitHubに書かないでください。
+
+```dotenv
+AI_PROVIDER=groq
+GROQ_API_KEY=取得したGroqのAPIキー
+GROQ_MODEL=openai/gpt-oss-20b
+```
+
+`/ai settings` で接続先が `groq`、モデルが `openai/gpt-oss-20b` になっていることを確認します。`/ai chat`・Botメンション・`/aki` が同じ設定で動きます。Groq選択時はGemini APIキーは不要で、Groqのエラーを理由にGeminiへ自動切り替えしません。追加ライブラリの導入は不要です。
+
+Groqでは `openai/gpt-oss-20b` と `openai/gpt-oss-120b` に対応します。既存の保存設定がGeminiならGroqの既定モデルへ切り替えます。保存済みGroqモデルがある場合は、そのモデルを優先するため `/ai model openai/gpt-oss-20b` で変更してください（サーバー管理者）。`/ai models` はGroqの一覧から、このBotが対応するGPT-OSSモデルを表示します。
+
+思考レベルは `auto / low / medium / high` です。Groqで `auto` の場合は `low` とし、返信を短く保ちます。`off / minimal` は対応しません。`/aki` は常にlowを使います。思考過程はAPIに非表示を指定し、Discordへの返信や履歴には最終回答のみを使用します。シフォンの固定設定・語尾・絵文字上限・一般ユーザーによる設定変更の制限は共通です。
+
+APIキーは送信時にAuthorizationヘッダーへ設定し、URL・ログ・`ai_settings.json` には保存しません。質問と直近の会話履歴はGroqに送信され、Groq側の料金・利用上限が適用されます。通信は待機を含め最大35秒、HTTPエラーは生の応答本文を表示しません。公式仕様：https://console.groq.com/docs/model/openai/gpt-oss-20b 、https://console.groq.com/docs/structured-outputs
+
+`AI_PROVIDER=gemini` にすると従来のGemini接続を使います。`AI_PROVIDER` が空なら `GROQ_API_KEY` が設定されている場合にGroq、それ以外はGeminiを選びます。以下はGeminiを選択した場合の設定です。
+
+## Geminiを使う場合の最初の設定
 
 1. https://aistudio.google.com/apikey でGemini APIキーを取得します。
 2. MWSでは環境変数に、PCではこのフォルダーの `.env` に `GEMINI_API_KEY=取得したキー` を設定します。DiscordのBotトークンとは別のキーです。チャットには貼らないでください。

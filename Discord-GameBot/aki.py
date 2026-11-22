@@ -1,4 +1,4 @@
-"""A bounded, single-player Gemini guessing game with isolated game history."""
+"""A bounded, single-player AI guessing game with isolated game history."""
 import asyncio
 from collections import OrderedDict
 import json
@@ -12,6 +12,7 @@ import discord
 from discord import app_commands
 
 from gemini_chat import AIError, response_text, thinking_config
+from groq_api import MODELS as GROQ_MODELS
 
 log = logging.getLogger(__name__)
 MAX_QUESTIONS = 20
@@ -142,8 +143,9 @@ class AkiGame:
             else:
                 description = self.text
         embed = discord.Embed(title='🔮 AI人物当て /aki', description=description, colour=0x9966CC)
+        provider = 'Groq' if self.model in GROQ_MODELS else 'Gemini'
         embed.set_footer(text=f'回答 {len(self.answers)}/{MAX_QUESTIONS}問・推測 {self.guesses}/{MAX_GUESSES}回'
-                              '｜操作は開始した本人のみ｜質問と回答をGeminiに送信')
+                              f'｜操作は開始した本人のみ｜質問と回答を{provider}に送信')
         return embed
 
     def release(self):
@@ -239,8 +241,10 @@ class AkiService:
         if key in self.games:
             await interaction.response.send_message('進行中の `/aki` があります。元のパネルの「終了」を押すか、5分間の操作期限を待ってください。', ephemeral=True)
             return
-        if not os.getenv('GEMINI_API_KEY', '').strip():
-            await interaction.response.send_message('Gemini APIキーが未設定です。既存のAI機能と同じ GEMINI_API_KEY を設定してください。', ephemeral=True)
+        model = self.ai.settings(interaction.guild_id)['model']
+        key_name = 'GROQ_API_KEY' if model in GROQ_MODELS else 'GEMINI_API_KEY'
+        if not os.getenv(key_name, '').strip():
+            await interaction.response.send_message(f'AIのAPIキーが未設定です。環境変数 {key_name} を設定してください。', ephemeral=True)
             return
         now = time.monotonic()
         if now - self.last_started.get(key, -100) < 30:
@@ -249,8 +253,7 @@ class AkiService:
         if len(self.games) >= 100:
             await interaction.response.send_message('現在ゲームが混み合っています。少し待ってから試してください。', ephemeral=True)
             return
-        model = self.ai.settings(interaction.guild_id)['model']
-        if not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,120}', model):
+        if not isinstance(model, str) or not (model in GROQ_MODELS or re.fullmatch(r'[A-Za-z0-9._-]{1,120}', model)):
             await interaction.response.send_message('AIモデルの設定を確認してください。管理者が `/ai model` で変更できます。', ephemeral=True)
             return
         game = AkiGame(self, interaction, model)
