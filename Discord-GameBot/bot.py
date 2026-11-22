@@ -137,7 +137,7 @@ bot = commands.Bot(command_prefix='!', intents=intents,
                    activity=discord.CustomActivity(name=STATUS_MESSAGES[0]))
 
 
-@tasks.loop(seconds=5)
+@tasks.loop(seconds=3)
 async def rotate_status():
     await bot.wait_until_ready()
     text = STATUS_MESSAGES[rotate_status.current_loop % len(STATUS_MESSAGES)]
