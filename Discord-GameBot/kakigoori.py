@@ -1,8 +1,12 @@
 """Mix a bottomless bowl of shaved ice and rate its fictional recipe."""
 from dataclasses import dataclass
 from itertools import combinations
+import logging
+import uuid
 
 import discord
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -103,7 +107,7 @@ def bowl_colour(recipe):
 
 
 class KakigooriView(discord.ui.View):
-    def __init__(self, player_id, display_name):
+    def __init__(self, player_id, display_name, bot=None):
         super().__init__(timeout=600)
         self.player_id = player_id
         self.display_name = display_name
@@ -112,6 +116,9 @@ class KakigooriView(discord.ui.View):
         self.amount = 1
         self.finished = False
         self.message = None
+        self.bot = bot
+        self.reward_id = 'kakigoori:' + uuid.uuid4().hex
+        self.reward_busy, self.rewarded = False, False
 
     def embed(self):
         embed = discord.Embed(title='🍧 かき氷シロップバー', colour=bowl_colour(self.recipe))
@@ -126,6 +133,8 @@ class KakigooriView(discord.ui.View):
             score, comment = evaluate(self.recipe)
             embed.add_field(name='美味しそう度', value=f'**{score} / 100点**', inline=False)
             embed.add_field(name='ひと口コメント', value=comment, inline=False)
+            if self.rewarded:
+                embed.add_field(name='経験値', value='+3 XP', inline=False)
         else:
             selected = '・'.join(INGREDIENTS[key].name for key in self.selected) or '未選択'
             embed.add_field(name='次に盛るもの', value=f'{selected}\n各 {self.amount}杯ずつ', inline=False)
@@ -136,12 +145,18 @@ class KakigooriView(discord.ui.View):
         if interaction.user.id != self.player_id:
             await interaction.response.send_message('自分のかき氷は `/kakigoori` で作ってください。', ephemeral=True)
             return False
+        if self.reward_busy:
+            await interaction.response.send_message('報酬を保存中です。少しお待ちください。', ephemeral=True)
+            return False
         return True
 
-    async def refresh(self, interaction):
+    async def refresh(self, interaction, acknowledged=False):
         for child in self.children:
             child.disabled = self.finished and child is not self.reset
-        await interaction.response.edit_message(embed=self.embed(), view=self)
+        if acknowledged:
+            await interaction.edit_original_response(embed=self.embed(), view=self)
+        else:
+            await interaction.response.edit_message(embed=self.embed(), view=self)
 
     @discord.ui.select(placeholder='シロップ・トッピングを選ぶ（複数選択OK）', min_values=1,
                        max_values=len(INGREDIENTS), row=0,
@@ -170,18 +185,40 @@ class KakigooriView(discord.ui.View):
 
     @discord.ui.button(label='完成！', emoji='🍧', style=discord.ButtonStyle.success, row=2)
     async def finish(self, interaction, button):
+        if self.finished or self.reward_busy:
+            await interaction.response.send_message('完成済み、または保存中です。', ephemeral=True)
+            return
         if not self.recipe:
             await interaction.response.send_message('まずは1杯かけてみましょう。', ephemeral=True)
             return
+        acknowledged = self.bot is not None and hasattr(self.bot, 'solo_rewards') and interaction.guild is not None
+        if acknowledged:
+            self.reward_busy = True
+            try:
+                await interaction.response.defer()
+                from solo_rewards import reward_solo
+                await reward_solo(self.bot, interaction.guild, interaction.channel, self.player_id, self.reward_id, 3)
+                self.rewarded = True
+            except Exception as exc:
+                log.warning('Kakigoori reward save failed (error_type=%s)', type(exc).__name__)
+                await interaction.followup.send('報酬を保存できませんでした。「完成！」でもう一度試してください。', ephemeral=True)
+                return
+            finally:
+                self.reward_busy = False
         self.finished = True
-        await self.refresh(interaction)
+        await self.refresh(interaction, acknowledged=acknowledged)
 
     @discord.ui.button(label='最初から', style=discord.ButtonStyle.secondary, row=2)
     async def reset(self, interaction, button):
+        if self.reward_busy:
+            await interaction.response.send_message('報酬を保存中です。少しお待ちください。', ephemeral=True)
+            return
         self.recipe.clear()
         self.selected.clear()
         self.amount = 1
         self.finished = False
+        self.rewarded = False
+        self.reward_id = 'kakigoori:' + uuid.uuid4().hex
         for select in (self.choose, self.quantity):
             for option in select.options:
                 option.default = False
@@ -201,6 +238,6 @@ def register_kakigoori(bot):
     @bot.tree.command(name='kakigoori', description='シロップ盛り放題！自分だけのかき氷を作って美味しそう度を採点')
     async def kakigoori(interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
-        view = KakigooriView(interaction.user.id, interaction.user.display_name)
+        view = KakigooriView(interaction.user.id, interaction.user.display_name, bot)
         view.message = await interaction.edit_original_response(
             embed=view.embed(), view=view, allowed_mentions=discord.AllowedMentions.none())

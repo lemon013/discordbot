@@ -60,11 +60,15 @@ class BlackjackStore:
 
     @staticmethod
     def state(row):
-        return {**dict(row), **json.loads(row['state'])}
+        state = {**dict(row), **json.loads(row['state'])}
+        if state.get('xp_reward'):
+            state['xp_reward']['new'] = False
+        return state
 
     @staticmethod
     def save(db, state):
         data = {key: state[key] for key in ('player', 'dealer', 'deck', 'outcome', 'payout')}
+        data['xp_reward'] = state.get('xp_reward')
         db.execute('UPDATE blackjack_rounds SET state=?,status=?,revision=?,expires_at=? WHERE round_id=?',
                    (json.dumps(data), state['status'], state['revision'], state['expires_at'], state['round_id']))
 
@@ -98,14 +102,19 @@ class BlackjackStore:
         self.save(db, state)
         wallet = self.casino.wallet(db, state['guild_id'], state['user_id'])
         result = dict(balance=wallet['balance'] + payout, wager=state['wager'], payout=payout, outcome=outcome)
+        result['xp_reward'] = self.casino.award_game_xp(db, state['guild_id'], state['user_id'],
+                                                     'blackjack:' + state['round_id'], payout > state['wager'])
         self.casino.finish(db, state['round_id'] + ':settle', state['guild_id'], state['user_id'],
                            'blackjack', wallet['balance'], result, now)
         state['balance'] = result['balance']
+        state['xp_reward'] = result['xp_reward']
+        self.save(db, state)
         return state
 
     def start(self, guild_id, user_id, round_id, wager=None, now=None):
         now = time.time() if now is None else now
         with closing(self.casino.connect()) as db, db:
+            self.casino.prepare_game_db(db)
             db.execute('BEGIN IMMEDIATE')
             existing = db.execute('SELECT * FROM blackjack_rounds WHERE round_id=?', (round_id,)).fetchone()
             if existing:
@@ -153,6 +162,7 @@ class BlackjackStore:
             raise CasinoError('ヒットまたはスタンドを選んでください。')
         now = time.time() if now is None else now
         with closing(self.casino.connect()) as db, db:
+            self.casino.prepare_game_db(db)
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT * FROM blackjack_rounds WHERE round_id=?', (round_id,)).fetchone()
             if row is None or (row['guild_id'], row['user_id']) != (guild_id, user_id):
@@ -191,6 +201,7 @@ class BlackjackStore:
     def expire(self, now=None):
         now = time.time() if now is None else now
         with closing(self.casino.connect()) as db, db:
+            self.casino.prepare_game_db(db)
             db.execute('BEGIN IMMEDIATE')
             rows = db.execute("SELECT * FROM blackjack_rounds WHERE status='active' AND expires_at<=? LIMIT 100", (now,)).fetchall()
             return [self.settle(db, self.state(row), now) for row in rows]
@@ -213,6 +224,8 @@ def blackjack_embed(state):
     if not done:
         embed.add_field(name='自動スタンド', value=f"<t:{int(state['expires_at'])}:R>", inline=False)
     embed.set_footer(text='通常勝利2倍／最初の21は2.5倍／引き分け返却。2分操作がないと自動スタンド。')
+    if state.get('xp_reward'):
+        embed.add_field(name='経験値', value=f"+{state['xp_reward']['base_xp']} XP", inline=False)
     return embed
 
 
@@ -242,6 +255,9 @@ class BlackjackService:
         await interaction.response.defer(thinking=True)
         try:
             state = await asyncio.to_thread(self.store.start, interaction.guild_id, interaction.user.id, str(interaction.id), wager)
+            if state.get('xp_reward'):
+                from solo_rewards import notify_solo
+                await notify_solo(self.bot, interaction.guild, interaction.channel, state['xp_reward'])
             view = BlackjackView(self, state) if state['status'] == 'active' else None
             message = await interaction.edit_original_response(embed=blackjack_embed(state), view=view, allowed_mentions=discord.AllowedMentions.none())
             await asyncio.to_thread(self.store.bind_message, state, interaction.channel_id, message.id)
@@ -256,6 +272,9 @@ class BlackjackService:
         try:
             state = await asyncio.to_thread(self.store.act, interaction.guild_id, interaction.user.id,
                 previous['round_id'], str(interaction.id), action, previous['revision'])
+            if state.get('xp_reward'):
+                from solo_rewards import notify_solo
+                await notify_solo(self.bot, interaction.guild, interaction.channel, state['xp_reward'])
             view = BlackjackView(self, state) if state['status'] == 'active' else None
             await interaction.edit_original_response(embed=blackjack_embed(state), view=view, allowed_mentions=discord.AllowedMentions.none())
         except CasinoError as error:
@@ -269,6 +288,11 @@ class BlackjackService:
         try:
             states = await asyncio.to_thread(self.store.expire)
             for state in states:
+                if state.get('xp_reward'):
+                    from solo_rewards import notify_solo
+                    guild = self.bot.get_guild(state['guild_id'])
+                    channel = self.bot.get_channel(state.get('channel_id')) if state.get('channel_id') else None
+                    await notify_solo(self.bot, guild, channel, state['xp_reward'])
                 if not state.get('channel_id') or not state.get('message_id'):
                     continue
                 try:

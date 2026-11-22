@@ -598,117 +598,8 @@ async def wordwolfex(interaction: discord.Interaction):
 
 # --- 1/8192 GAME（個人用の運試し） ---
 # ユーザーIDごとに進行状況を保持し、同じユーザーの同時起動を防ぎます。
-solo_8192_games: dict[int, int] = {}
-
-def game_8192_embed(correct_count: int) -> discord.Embed:
-    # 次に挑戦する確率。0回正解なら1/2、12回正解なら1/8192。
-    denominator = 2 ** (correct_count + 1)
-    embed = discord.Embed(
-        title='🎰 1/8192 GAME',
-        description='当たりだと思う扉を選んでください。',
-        color=discord.Color.blurple()
-    )
-    embed.add_field(name='CURRENT PROBABILITY', value=f'## 1/{denominator:,}', inline=False)
-    embed.add_field(name='連続正解', value=f'{correct_count} / 13 回', inline=True)
-    embed.set_footer(text='青か緑、どちらか一方が当たりです。')
-    return embed
-
-class Game8192View(discord.ui.View):
-    def __init__(self, player_id: int, correct_count: int):
-        super().__init__(timeout=None)
-        self.player_id = player_id
-        self.correct_count = correct_count
-        # 当たりの色は、ボードを表示する時点でランダムに決定します。
-        self.correct_color = random.choice(('blue', 'green'))
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.player_id:
-            await interaction.response.send_message(
-                'このゲームを操作できるのは、起動したプレイヤーだけです。',
-                ephemeral=True
-            )
-            return False
-        if self.player_id not in solo_8192_games:
-            await interaction.response.send_message(
-                'このゲームはすでに終了しています。',
-                ephemeral=True
-            )
-            return False
-        return True
-
-    async def choose(self, interaction: discord.Interaction, selected_color: str):
-        if selected_color == self.correct_color:
-            next_count = self.correct_count + 1
-            if next_count >= 13:
-                solo_8192_games.pop(self.player_id, None)
-                for item in self.children:
-                    item.disabled = True
-                embed = discord.Embed(
-                    title='🎉 1/8192 GAME CLEAR!',
-                    description='**見事、13回連続正解！**',
-                    color=discord.Color.gold()
-                )
-                embed.add_field(name='達成確率', value='## 1/8192', inline=False)
-                embed.add_field(name='連続正解', value='13 / 13 回', inline=True)
-                await interaction.response.edit_message(content=None, embed=embed, view=self)
-                return
-
-            solo_8192_games[self.player_id] = next_count
-            next_view = Game8192View(self.player_id, next_count)
-            await interaction.response.edit_message(
-                content='✅ **正解！次の扉へ進みます。**',
-                embed=game_8192_embed(next_count),
-                view=next_view
-            )
-            return
-
-        # 不正解時は、今回挑戦した確率（正解回数+今回の選択）を表示します。
-        denominator = 2 ** (self.correct_count + 1)
-        solo_8192_games.pop(self.player_id, None)
-        for item in self.children:
-            item.disabled = True
-        result = discord.Embed(
-            title='❌ GAME OVER',
-            description=(
-                '間違いを選んだ。\n'
-                f'**引き当てた確率: 1/{denominator:,}**'
-            ),
-            color=discord.Color.red()
-        )
-        result.add_field(name='連続正解', value=f'{self.correct_count} 回', inline=True)
-        await interaction.response.edit_message(content=None, embed=result, view=self)
-
-    @discord.ui.button(label='青の扉', style=discord.ButtonStyle.primary, emoji='🔵')
-    async def blue_door(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.choose(interaction, 'blue')
-
-    @discord.ui.button(label='緑の扉', style=discord.ButtonStyle.success, emoji='🟢')
-    async def green_door(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.choose(interaction, 'green')
-
-
-@bot.tree.command(name='8192game', description='1/8192の確率に挑戦する運試しゲーム')
-@app_commands.guild_only()
-async def game_8192(interaction: discord.Interaction):
-    age = (discord.utils.utcnow() - interaction.created_at).total_seconds()
-    log.info('/8192game received: id=%s age=%.3fs pid=%s', interaction.id, age, os.getpid())
-    # Acknowledge before constructing and sending the game board.
-    await interaction.response.defer(thinking=True)
-    player_id = interaction.user.id
-    if player_id in solo_8192_games:
-        await interaction.edit_original_response(
-            content='すでに1/8192 GAMEに挑戦中です。表示されているボードから続けてください。'
-        )
-        return
-
-    solo_8192_games[player_id] = 0
-    try:
-        view = Game8192View(player_id, 0)
-        await interaction.edit_original_response(embed=game_8192_embed(0), view=view)
-    except Exception:
-        # A failed send must not leave the user stuck in an invisible game.
-        solo_8192_games.pop(player_id, None)
-        raise
+from game_8192 import register_8192
+register_8192(bot)
 
 @bot.tree.error
 async def on_app_command_error(interaction, error):
@@ -739,7 +630,9 @@ register_aki(bot, gemini_service)
 from leveling import register_leveling
 bot.leveling_service = register_leveling(bot)
 from casino import register_casino
-register_casino(bot)
+casino_service = register_casino(bot)
+from solo_rewards import SoloRewards
+bot.solo_rewards = SoloRewards(casino_service.store, bot.leveling_service.store)
 from shop import register_shop
 register_shop(bot)
 from party_rewards import PartyRewards

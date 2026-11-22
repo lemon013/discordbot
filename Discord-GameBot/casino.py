@@ -46,8 +46,9 @@ def draw(game, wager, choice=None):
 
 
 class CasinoStore:
-    def __init__(self, path=None):
+    def __init__(self, path=None, levels=None):
         self.path = Path(path) if path is not None else database_path('casino')
+        self.levels = levels
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self.connect()) as db, db:
             db.executescript('''
@@ -144,6 +145,19 @@ class CasinoStore:
             db.execute('UPDATE casino_wallets SET last_daily=? WHERE guild_id=? AND user_id=?', (day, guild_id, user_id))
             return self.finish(db, event_id, guild_id, user_id, 'daily', wallet['balance'], result, now)
 
+    def prepare_game_db(self, db):
+        if self.levels is not None:
+            from solo_rewards import attach_levels
+            return attach_levels(db, self, self.levels)
+        return None
+
+    def award_game_xp(self, db, guild_id, user_id, event_id, won):
+        if self.levels is None:
+            return None
+        from solo_rewards import grant_in
+        alias = 'main' if self.path.resolve() == self.levels.path.resolve() else 'levels'
+        return grant_in(db, self, alias, guild_id, user_id, 'solo:casino:' + event_id, 5 if won else 3)
+
     def play(self, guild_id, user_id, event_id, game, wager, choice=None, now=None):
         if game not in GAME_NAMES or not isinstance(wager, int) or not MIN_BET <= wager <= MAX_BET:
             raise CasinoError(f'賭け金は{MIN_BET}〜{MAX_BET:,}ジュエルで指定してください。')
@@ -153,9 +167,12 @@ class CasinoStore:
             raise CasinoError('1〜6を選んでください。')
         now = time.time() if now is None else now
         with closing(self.connect()) as db, db:
+            self.prepare_game_db(db)
             db.execute('BEGIN IMMEDIATE')
             previous = self.replay(db, event_id, guild_id, user_id, game)
             if previous is not None:
+                if previous.get('xp_reward'):
+                    previous['xp_reward']['new'] = False
                 return previous
             wallet = self.wallet(db, guild_id, user_id)
             if wallet['last_play'] is not None and now - wallet['last_play'] < 3:
@@ -164,6 +181,7 @@ class CasinoStore:
                 raise CasinoError(f"ジュエルが足りません。現在の残高：💎 {wallet['balance']:,} ジュエル")
             result = draw(game, wager, choice)
             result.update(wager=wager, game=game, balance=wallet['balance'] - wager + result['payout'])
+            result['xp_reward'] = self.award_game_xp(db, guild_id, user_id, event_id, result['payout'] > wager)
             db.execute('UPDATE casino_wallets SET last_play=? WHERE guild_id=? AND user_id=?', (now, guild_id, user_id))
             return self.finish(db, event_id, guild_id, user_id, game, wallet['balance'], result, now)
 
@@ -215,14 +233,14 @@ class CasinoStore:
     def history(self, guild_id, user_id):
         with closing(self.connect()) as db:
             return [dict(row) for row in db.execute(
-                'SELECT kind,delta,balance_after,created_at FROM casino_transactions WHERE guild_id=? AND user_id=? ORDER BY created_at DESC,rowid DESC LIMIT 10',
+                "SELECT kind,delta,balance_after,created_at FROM casino_transactions WHERE guild_id=? AND user_id=? AND (kind!='solo_reward' OR delta!=0) ORDER BY created_at DESC,rowid DESC LIMIT 10",
                 (guild_id, user_id))]
 
 
 class Casino:
     def __init__(self, bot, store=None):
         self.bot = bot
-        self.store = store or CasinoStore()
+        self.store = store or CasinoStore(levels=getattr(getattr(bot, 'leveling_service', None), 'store', None))
 
     async def execute(self, interaction, action, **values):
         await interaction.response.defer(thinking=True, ephemeral=action not in (*GAME_NAMES, 'leaderboard', 'gift'))
@@ -246,6 +264,10 @@ class Casino:
                 embed.add_field(name='払い戻し（賭け金込み）', value=f"💎 {result['payout']:,}")
                 embed.add_field(name='収支', value=f'💎 {net:+,}')
                 embed.add_field(name='残高', value=f"💎 {result['balance']:,} ジュエル", inline=False)
+                if result.get('xp_reward'):
+                    embed.add_field(name='経験値', value=f"+{result['xp_reward']['base_xp']} XP", inline=False)
+                    from solo_rewards import notify_solo
+                    await notify_solo(self.bot, interaction.guild, interaction.channel, result['xp_reward'])
                 await interaction.edit_original_response(embed=embed, allowed_mentions=discord.AllowedMentions.none())
                 return
             if action == 'balance':
@@ -270,7 +292,7 @@ class Casino:
             elif action == 'history':
                 rows = await asyncio.to_thread(self.store.history, guild_id, user_id)
                 text = '**💎 最近のジュエル履歴（最大10件）**\n' + ('\n'.join(
-                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'level_reward': 'レベルアップ報酬', 'daily': 'デイリー', 'edit': '管理者編集', 'gift_send': '送金', 'gift_receive': '受取', 'shop': 'ショップ', 'blackjack_bet': 'ブラックジャック掛け金', 'blackjack': 'ブラックジャック払い戻し'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
+                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'solo_reward': 'ソロゲーム報酬', 'level_reward': 'レベルアップ報酬', 'daily': 'デイリー', 'edit': '管理者編集', 'gift_send': '送金', 'gift_receive': '受取', 'shop': 'ショップ', 'blackjack_bet': 'ブラックジャック掛け金', 'blackjack': 'ブラックジャック払い戻し'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
                     for row in rows) or 'まだ履歴がありません。')
             else:
                 text = ('**🎰 カジノ / 💎ジュエル**\n初期残高：0ジュエル。デイリー：500ジュエル（日本時間0時更新）。\n'

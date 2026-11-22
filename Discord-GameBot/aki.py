@@ -130,6 +130,7 @@ class AkiGame:
         self.guesses, self.revision = 0, 0
         self.phase, self.text = 'question', FIRST_QUESTION
         self.done, self.message = False, None
+        self.pending_finish = None
         self.lock = asyncio.Lock()
         self.view = AkiView(self)
 
@@ -162,7 +163,21 @@ class AkiGame:
             self.release()
             log.warning('Aki panel unavailable (game_id=%s)', self.id)
 
-    async def finish(self, text):
+    async def finish(self, text, reward=False):
+        bot = getattr(self.service.ai, 'bot', None)
+        if reward and self.answers and bot is not None and hasattr(bot, 'solo_rewards'):
+            try:
+                from solo_rewards import reward_solo
+                await reward_solo(bot, self.message.guild, self.message.channel, self.owner, 'aki:' + self.id, 3)
+            except Exception as exc:
+                log.warning('Aki reward save failed (game_id=%s, error_type=%s)', self.id, type(exc).__name__)
+                self.pending_finish = text
+                self.phase, self.text = 'error', '報酬を保存できませんでした。「再試行」で報酬の保存をやり直せます。'
+                self.view.stop()
+                self.view = AkiView(self)
+                await self.edit(embed=self.embed(), view=self.view)
+                return
+            text += '\n経験値：+3 XP'
         self.release()
         await self.edit(embed=self.embed(text), view=None)
 
@@ -181,7 +196,7 @@ class AkiGame:
             self.phase, self.text = 'error', 'AIとの通信に失敗しました。「再試行」で続けてください。'
         else:
             if kind == 'give_up':
-                await self.finish('今回は当てられなかったリミ！別の人物でもう一度遊んでね。')
+                await self.finish('今回は当てられなかったリミ！別の人物でもう一度遊んでね。', reward=True)
                 return
             self.phase, self.text = kind, text
             if kind == 'guess':
@@ -214,13 +229,16 @@ class AkiGame:
             if action == 'quit':
                 await self.finish('ゲームを終了しました。また `/aki` で遊んでねリミ！')
                 return
+            if self.pending_finish is not None:
+                await self.finish(self.pending_finish, reward=True)
+                return
             if self.phase == 'guess':
                 if action == 'correct':
-                    await self.finish(f'🎉 **{display(self.text)}**！当てられたリミ！\nまた `/aki` で遊んでね。')
+                    await self.finish(f'🎉 **{display(self.text)}**！当てられたリミ！\nまた `/aki` で遊んでね。', reward=True)
                     return
                 self.rejected.append(self.text)
                 if self.guesses >= MAX_GUESSES:
-                    await self.finish('3回の推測では当てられなかったリミ！遊んでくれてありがとう。')
+                    await self.finish('3回の推測では当てられなかったリミ！遊んでくれてありがとう。', reward=True)
                     return
             elif self.phase == 'question':
                 self.answers.append({'question': self.text, 'answer': ANSWERS[action]})
