@@ -755,6 +755,8 @@ from sound import register_sound
 sound_service = register_sound(bot)
 from soundboard import register_soundboard
 register_soundboard(bot, sound_service)
+from ping import register_ping
+register_ping(bot)
 
 from storage import register_backups
 register_backups(bot)
