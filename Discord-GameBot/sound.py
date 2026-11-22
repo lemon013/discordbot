@@ -143,6 +143,7 @@ class Sound:
         self.locks, self.playing, self.idle_tasks = {}, {}, {}
         self.preparing, self.connecting = set(), {}
         self.last_stats = {}
+        self.music = None
 
     def lock(self, guild_id):
         return self.locks.setdefault(guild_id, asyncio.Lock())
@@ -215,6 +216,8 @@ class Sound:
                      guild.id, *self.last_stats[guild.id])
             self.cancel_idle(guild.id)
             self.idle_tasks[guild.id] = asyncio.create_task(self.idle_disconnect(guild))
+        if self.music is not None:
+            self.music.on_finished(guild, source)
 
     def playback_status(self, guild):
         voice = guild.voice_client
@@ -244,6 +247,7 @@ class Sound:
                 voice = guild.voice_client
                 if (voice and voice.is_connected() and guild.id not in self.playing
                         and guild.id not in self.preparing and guild.id not in self.connecting
+                        and not (self.music is not None and self.music.has_work(guild.id))
                         and not voice.is_playing() and not voice.is_paused()):
                     await voice.disconnect(force=True)
         except asyncio.CancelledError:
@@ -315,6 +319,7 @@ class Sound:
                 options='-vn -map 0:a:0 -frame_duration 20 -application audio', stderr=error_output)
             source = UploadedAudio(inner, directory, cleanup_complete, stderr=error_output)
             source.guild_id = guild.id
+            source.title = attachment.filename
 
             def after(error):
                 if error:
@@ -358,6 +363,12 @@ class Sound:
             if action == 'status':
                 await self.status(interaction, self.playback_status(interaction.guild))
                 return
+            if self.music is not None and action in ('stop', 'leave'):
+                cancelled = await self.music.cancel_pending(interaction.guild.id, channel.id)
+                voice = interaction.guild.voice_client
+                if cancelled and (not voice or not voice.is_connected()):
+                    await self.status(interaction, '音楽キューを消去し、準備中の再生を取り消しました。')
+                    return
             lock = self.lock(interaction.guild.id)
             if lock.locked():
                 raise SoundError('音声の準備・操作中です。表示が更新されるまでお待ちください。')
@@ -373,11 +384,15 @@ class Sound:
                     if voice.channel.id != channel.id:
                         raise SoundError('Botが参加しているVCのチャットで実行してください。')
                     if action == 'stop':
+                        if self.music is not None:
+                            self.music.clear(guild_id=interaction.guild.id)
                         voice.stop()
                         self.cancel_idle(interaction.guild.id)
                         self.idle_tasks[interaction.guild.id] = asyncio.create_task(self.idle_disconnect(interaction.guild))
                         answer = '⏹️ 再生を停止しました。60秒で自動退出します。'
                     else:
+                        if self.music is not None:
+                            self.music.clear(guild_id=interaction.guild.id)
                         self.cancel_idle(interaction.guild.id)
                         self.playing.pop(interaction.guild.id, None)
                         await voice.disconnect(force=True)

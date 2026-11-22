@@ -15,6 +15,7 @@ from sound import MAX_BYTES, SoundError
 
 MAX_DURATION = 30 * 60
 DOWNLOAD_TIMEOUT = 110
+MAX_QUEUE = 50
 ERRORS = {
     'dependency': 'YouTube再生の準備ができていません。更新後のrequirements.txtでパッケージを再インストールしてください。',
     'live': 'ライブ配信・配信予約には対応していません。公開済みの通常動画を指定してください。',
@@ -82,6 +83,67 @@ async def kill_download(process):
     await process.wait()
 
 
+def normalize_playlist(value):
+    value = value.strip().removeprefix('<').removesuffix('>')
+    try:
+        if len(value) > 2048:
+            raise ValueError()
+        url = urlsplit(value)
+        ids = parse_qs(url.query).get('list', [])
+        if not ids:
+            return None
+        if (url.scheme != 'https' or url.username is not None or url.password is not None or url.port
+                or (url.hostname or '').lower() not in ('youtube.com', 'www.youtube.com', 'm.youtube.com',
+                    'music.youtube.com', 'youtu.be', 'www.youtu.be')
+                or len(ids) != 1 or not re.fullmatch(r'[A-Za-z0-9_-]{10,100}', ids[0])):
+            raise ValueError()
+        return 'https://www.youtube.com/playlist?list=' + ids[0]
+    except ValueError:
+        raise SoundError('公開されているYouTubeプレイリストのURLを指定してください。') from None
+
+
+async def load_playlist(url, slots):
+    canonical = normalize_playlist(url)
+    if canonical is None:
+        raise SoundError('YouTubeプレイリストのURLを指定してください。')
+    async with slots:
+        output = await asyncio.wait_for(run_worker(canonical, '-', playlist=True), timeout=120)
+    try:
+        if len(output) > 131072:
+            raise ValueError()
+        data = json.loads(output)
+        if not data.get('ok'):
+            raise SoundError(ERRORS.get(data.get('reason'), ERRORS['unavailable']))
+        entries = data['entries']
+        if not isinstance(entries, list) or not 0 < len(entries) <= MAX_QUEUE:
+            raise ValueError()
+        tracks = [{'url': normalize_url(item['url']), 'title': str(item.get('title') or '')[:150]} for item in entries]
+        return tracks, bool(data.get('limited'))
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise SoundError('プレイリストから再生可能な動画を取得できませんでした。') from None
+
+
+async def run_worker(url, destination, playlist=False):
+    worker = Path(__file__).with_name('youtube_worker.py')
+    flags = ({'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+             if os.name == 'nt' else {'start_new_session': True})
+    environment = {key: value for key, value in os.environ.items()
+                   if not any(tag in key.upper() for tag in ('TOKEN', 'SECRET', 'API_KEY'))}
+    # MWS can add its .packages directory to sys.path at launch time.
+    environment['PYTHONPATH'] = os.pathsep.join(os.path.abspath(item or os.getcwd()) for item in sys.path)
+    arguments = [sys.executable, '-u', str(worker), url, str(destination)] + (['playlist'] if playlist else [])
+    process = await asyncio.create_subprocess_exec(*arguments,
+        stdout=asyncio.subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment, **flags)
+    try:
+        output, _ = await asyncio.wait_for(process.communicate(), timeout=DOWNLOAD_TIMEOUT)
+    except (asyncio.TimeoutError, asyncio.CancelledError) as exc:
+        await kill_download(process)
+        if isinstance(exc, asyncio.CancelledError):
+            raise
+        raise SoundError('YouTubeの音声取得がタイムアウトしました。短い動画でもう一度試してください。') from None
+    return output
+
+
 class YouTubeAudio:
     download_timeout = 120
 
@@ -92,22 +154,7 @@ class YouTubeAudio:
 
     async def save(self, destination):
         async with self.slots:
-            worker = Path(__file__).with_name('youtube_worker.py')
-            flags = ({'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
-                     if os.name == 'nt' else {'start_new_session': True})
-            environment = {key: value for key, value in os.environ.items()
-                           if not any(tag in key.upper() for tag in ('TOKEN', 'SECRET', 'API_KEY'))}
-            # MWS can add its .packages directory to sys.path at launch time.
-            environment['PYTHONPATH'] = os.pathsep.join(os.path.abspath(item or os.getcwd()) for item in sys.path)
-            process = await asyncio.create_subprocess_exec(sys.executable, '-u', str(worker), self.url, str(destination),
-                stdout=asyncio.subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment, **flags)
-            try:
-                output, _ = await asyncio.wait_for(process.communicate(), timeout=DOWNLOAD_TIMEOUT)
-            except (asyncio.TimeoutError, asyncio.CancelledError) as exc:
-                await kill_download(process)
-                if isinstance(exc, asyncio.CancelledError):
-                    raise
-                raise SoundError('YouTubeの音声取得がタイムアウトしました。短い動画でもう一度試してください。') from None
+            output = await run_worker(self.url, destination)
             try:
                 if len(output) > 8192:
                     raise ValueError()
@@ -126,15 +173,5 @@ class YouTubeAudio:
 
 
 def register_youtube_play(bot, sound):
-    slots = asyncio.Semaphore(2)
-
-    @bot.tree.command(name='play', description='YouTube動画の音楽を、このVCで再生します')
-    @app_commands.guild_only()
-    @app_commands.describe(url='YouTube動画のURL（30分以内・音声25MB以内）')
-    async def play(interaction: discord.Interaction, url: str):
-        try:
-            audio = YouTubeAudio(url, slots)
-        except SoundError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
-            return
-        await sound.invoke(interaction, 'play', audio)
+    from music_queue import register_music
+    return register_music(bot, sound)

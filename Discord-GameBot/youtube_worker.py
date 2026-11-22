@@ -1,10 +1,11 @@
 """Isolated, terminable YouTube extraction. Stdout contains only a safe result."""
 import json
 import math
+from itertools import islice
 from pathlib import Path
 import sys
 
-from youtube_play import normalize_url, MAX_BYTES, MAX_DURATION
+from youtube_play import normalize_url, normalize_playlist, MAX_BYTES, MAX_DURATION, MAX_QUEUE
 
 
 class QuietLogger:
@@ -69,6 +70,44 @@ def download(url, destination):
         return {'ok': False, 'reason': reason or 'unavailable'}
 
 
+def playlist(url):
+    try:
+        import yt_dlp
+        import deno
+        runtime = deno.find_deno_bin()
+    except (ImportError, RuntimeError, OSError):
+        return {'ok': False, 'reason': 'dependency'}
+    try:
+        canonical = normalize_playlist(url)
+        if canonical is None:
+            return {'ok': False, 'reason': 'unavailable'}
+        with yt_dlp.YoutubeDL({'extract_flat': 'in_playlist', 'noplaylist': False,
+                'playlistend': MAX_QUEUE, 'lazy_playlist': True, 'ignoreerrors': True,
+                'quiet': True, 'no_warnings': True, 'cachedir': False, 'logger': QuietLogger(),
+                'socket_timeout': 15, 'retries': 1, 'js_runtimes': {'deno': {'path': runtime}}}) as downloader:
+            info = downloader.extract_info(canonical, download=False)
+            if not info or info.get('_type') not in ('playlist', 'multi_video'):
+                return {'ok': False, 'reason': 'unavailable'}
+            raw = list(islice(info.get('entries') or [], MAX_QUEUE))
+            entries = []
+            for entry in raw:
+                if not entry or entry.get('availability') in ('private', 'premium_only', 'subscriber_only', 'needs_auth'):
+                    continue
+                try:
+                    video = normalize_url('https://www.youtube.com/watch?v=' + str(entry.get('id', '')))
+                except Exception:
+                    continue
+                entries.append({'url': video, 'title': str(entry.get('title') or '')[:150]})
+            if not entries:
+                return {'ok': False, 'reason': 'unavailable'}
+            return {'ok': True, 'entries': entries, 'limited': len(raw) >= MAX_QUEUE}
+    except Exception:
+        return {'ok': False, 'reason': 'unavailable'}
+
+
 if __name__ == '__main__':
-    result = download(sys.argv[1], sys.argv[2]) if len(sys.argv) == 3 else {'ok': False, 'reason': 'unavailable'}
+    if len(sys.argv) == 4 and sys.argv[3] == 'playlist':
+        result = playlist(sys.argv[1])
+    else:
+        result = download(sys.argv[1], sys.argv[2]) if len(sys.argv) == 3 else {'ok': False, 'reason': 'unavailable'}
     print(json.dumps(result, ensure_ascii=True))
