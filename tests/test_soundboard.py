@@ -36,7 +36,7 @@ class SoundboardTests(unittest.IsolatedAsyncioTestCase):
     async def test_prefix_and_slash_publish_shared_panels_without_changing_prefix(self):
         await self.listener(self.message)
         panel = self.message.reply.call_args.kwargs
-        self.assertEqual(len(panel['view'].children), 8)
+        self.assertEqual(len(panel['view'].children), 10)
         self.assertIsNone(panel.get('ephemeral'))
         self.assertFalse(panel['mention_author'])
         self.assertEqual(self.bot.command_prefix, '!')
@@ -45,7 +45,7 @@ class SoundboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.message.reply.await_count, 1)
         await self.bot.tree.get_command('soundboard').callback(self.call)
         panel = self.call.response.send_message.call_args.kwargs
-        self.assertEqual(len(panel['view'].children), 8)
+        self.assertEqual(len(panel['view'].children), 10)
         self.assertIsNone(panel.get('ephemeral'))
 
     async def test_panels_and_clicks_require_membership_in_the_panel_voice_channel(self):
@@ -83,7 +83,7 @@ class SoundboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(registered.is_persistent())
         ids = [button.custom_id for button in registered.children]
         self.assertEqual(ids, [button.custom_id for button in restarted.children])
-        self.assertEqual(len(set(ids)), 8)
+        self.assertEqual(len(set(ids)), 10)
         self.assertTrue(all(button.service is self.service for button in registered.children))
 
     async def test_missing_asset_is_reported_without_starting_voice(self):
@@ -115,7 +115,7 @@ class SoundboardTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PackagedAudioTests(unittest.IsolatedAsyncioTestCase):
-    async def test_all_eight_mp3s_encode_to_audible_20ms_opus(self):
+    async def test_all_packaged_mp3s_encode_to_audible_20ms_opus(self):
         try:
             executable = ffmpeg_executable()
         except SoundError:

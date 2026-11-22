@@ -21,6 +21,8 @@ CLIPS = (
     ('understood', 'なるほど！'),
     ('how_to', 'どうやるの？！'),
     ('oops', 'しまった！'),
+    ('not_calm', '穏やかじゃないですね'),
+    ('as_planned', '計画通り'),
 )
 
 
@@ -74,7 +76,7 @@ def register_soundboard(bot, service):
     # Fixed IDs restore every existing panel after a restart without a database.
     bot.add_view(SoundboardView(service))
 
-    @bot.tree.command(name='soundboard', description='8つのセリフを再生できるサウンドボードを表示します')
+    @bot.tree.command(name='soundboard', description='10個のセリフを再生できるサウンドボードを表示します')
     @app_commands.guild_only()
     async def soundboard(interaction: discord.Interaction):
         try:
