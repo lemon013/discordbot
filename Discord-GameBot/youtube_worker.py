@@ -5,7 +5,7 @@ from itertools import islice
 from pathlib import Path
 import sys
 
-from youtube_play import normalize_url, normalize_playlist, MAX_BYTES, MAX_DURATION, MAX_QUEUE
+from youtube_play import normalize_url, normalize_playlist, normalize_search, MAX_BYTES, MAX_DURATION, MAX_QUEUE, SEARCH_LIMIT
 
 
 class QuietLogger:
@@ -105,8 +105,42 @@ def playlist(url):
         return {'ok': False, 'reason': 'unavailable'}
 
 
+def search(query):
+    try:
+        import yt_dlp
+    except ImportError:
+        return {'ok': False, 'reason': 'dependency'}
+    try:
+        # Construct a search directive ourselves; input is never an extraction URL.
+        query = normalize_search(query)
+        with yt_dlp.YoutubeDL({'extract_flat': True, 'skip_download': True,
+                'playlistend': SEARCH_LIMIT, 'ignoreerrors': True,
+                'quiet': True, 'no_warnings': True, 'cachedir': False, 'logger': QuietLogger(),
+                'socket_timeout': 10, 'retries': 0}) as downloader:
+            info = downloader.extract_info(f'ytsearch{SEARCH_LIMIT}:' + query, download=False)
+            if not info or not isinstance(info, dict) or 'entries' not in info:
+                return {'ok': False, 'reason': 'unavailable'}
+            entries, seen = [], set()
+            for entry in islice(info.get('entries') or [], SEARCH_LIMIT):
+                if not entry:
+                    continue
+                try:
+                    url = normalize_url('https://www.youtube.com/watch?v=' + str(entry.get('id', '')))
+                except Exception:
+                    continue
+                if url in seen:
+                    continue
+                seen.add(url)
+                entries.append({'url': url, 'title': str(entry.get('title') or 'YouTube動画')[:150]})
+            return {'ok': True, 'entries': entries}
+    except Exception:
+        return {'ok': False, 'reason': 'unavailable'}
+
+
 if __name__ == '__main__':
-    if len(sys.argv) == 4 and sys.argv[3] == 'playlist':
+    if len(sys.argv) == 4 and sys.argv[3] == 'search':
+        result = search(sys.argv[1])
+    elif len(sys.argv) == 4 and sys.argv[3] == 'playlist':
         result = playlist(sys.argv[1])
     else:
         result = download(sys.argv[1], sys.argv[2]) if len(sys.argv) == 3 else {'ok': False, 'reason': 'unavailable'}

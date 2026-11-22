@@ -66,6 +66,18 @@ VCに参加し、そのVCのチャットで `./soundboard` または `/soundboar
 
 YouTube側の変更で取得が失敗する場合は、対応するyt-dlpの更新が必要になる場合があります。公式の依存関係・JavaScript実行環境の説明：https://github.com/yt-dlp/yt-dlp/wiki/EJS 。Deno同梱パッケージ：https://github.com/denoland/deno_pypi
 
+## YouTube検索 `/search`
+
+`/search query:初音ミク 作業用 BGM` のように入力すると、YouTubeを検索し、候補のタイトルとリンクを最大7件、全員に見える埋め込みで表示します。検索語は1〜200文字で、空白を含められます。VCへの参加は不要で、通常のテキストチャンネルでも使えます。結果が7件未満の場合は、取得できた候補だけ表示します。
+
+検索のみではキューへ追加しません。選んだ動画のリンクをコピーし、参加中のVCのチャットで `/play url:動画のリンク` を実行してください。追加のAPIキーは不要です。検索は音声取得とは別の同時2件枠で実行し、待機を含め45秒を上限にします。タイムアウト時は検索用の子プロセスも終了します。
+
+## Amazon Musicについて
+
+Amazon MusicのURLからの直接再生は未対応です。現在の再生用ダウンローダーにはAmazon Music用の実装がありません。また公式Web APIは承認済み開発者向けのクローズドベータで、Botに必要な連携権限・認証は用意されていません。Amazon Musicの音源を、利用者に知らせずYouTubeの音源へ差し替えることもありません。曲名を `/search` で検索するか、手元の音声ファイルを `/sound play` で添付してください。
+
+公式APIの公開状況：https://developer.amazon.com/docs/music/API_web_overview_v2.html
+
 ## 起動環境
 
 両方のrequirements.txtに音声用依存関係を追加しています。通常の起動・MWSのGitHub更新時に依存関係を再インストールしてください。手動なら `python -m pip install -r requirements.txt` の後でBotを再起動します。

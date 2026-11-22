@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 
 from sound import SoundError
-from youtube_play import YouTubeAudio, normalize_url, normalize_playlist, load_playlist, MAX_QUEUE
+from youtube_play import YouTubeAudio, normalize_url, normalize_playlist, load_playlist, search_youtube, normalize_search, MAX_QUEUE
 
 log = logging.getLogger(__name__)
 
@@ -94,6 +94,7 @@ class Music:
         self.bot, self.sound = bot, sound
         self.sessions = {}
         self.slots = asyncio.Semaphore(2)
+        self.search_slots = asyncio.Semaphore(2)
         sound.music = self
 
     def has_work(self, guild_id):
@@ -326,6 +327,27 @@ class Music:
                 self.refresh(session)
         await self.sound.status(interaction, answer)
 
+    async def search(self, interaction, query):
+        await interaction.response.send_message('🔎 YouTubeを検索しています。',
+                                                allowed_mentions=discord.AllowedMentions.none())
+        try:
+            query = normalize_search(query)
+            entries = await search_youtube(query, self.search_slots)
+            embed = discord.Embed(title='🔎 YouTube検索結果', description=safe_title(query), colour=0x3498DB)
+            for index, entry in enumerate(entries, 1):
+                embed.add_field(name=f'候補 {index}',
+                    value=f'[{safe_title(entry["title"])}]({entry["url"]})', inline=False)
+            if not entries:
+                embed.description = '該当する動画が見つかりませんでした。別のキーワードで検索してください。'
+            embed.set_footer(text='再生するにはVCのチャットで /play url:動画のリンク を実行してください。')
+            await interaction.edit_original_response(content=None, embed=embed,
+                                                    allowed_mentions=discord.AllowedMentions.none())
+        except SoundError as exc:
+            await self.sound.status(interaction, str(exc))
+        except Exception as exc:
+            log.warning('YouTube search failed (error_type=%s)', type(exc).__name__)
+            await self.sound.status(interaction, 'YouTubeを検索できませんでした。時間をおいて再試行してください。')
+
     async def control(self, interaction, action):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
@@ -407,6 +429,12 @@ def register_music(bot, sound):
     @app_commands.describe(url='YouTube動画または公開プレイリストのURL')
     async def play(interaction: discord.Interaction, url: str):
         await service.enqueue(interaction, url)
+
+    @bot.tree.command(name='search', description='YouTubeを検索し、タイトルとリンクを最大7件表示します')
+    @app_commands.guild_only()
+    @app_commands.describe(query='検索ワード（空白OK・200文字まで）')
+    async def search(interaction: discord.Interaction, query: str):
+        await service.search(interaction, query)
 
     @bot.tree.command(name='music', description='このVCの音楽ダッシュボードを表示します')
     @app_commands.guild_only()

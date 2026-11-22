@@ -16,6 +16,7 @@ from sound import MAX_BYTES, SoundError
 MAX_DURATION = 30 * 60
 DOWNLOAD_TIMEOUT = 110
 MAX_QUEUE = 50
+SEARCH_LIMIT = 7
 ERRORS = {
     'dependency': 'YouTube再生の準備ができていません。更新後のrequirements.txtでパッケージを再インストールしてください。',
     'live': 'ライブ配信・配信予約には対応していません。公開済みの通常動画を指定してください。',
@@ -33,9 +34,11 @@ def normalize_url(value):
         raise SoundError('YouTube動画のURLを指定してください。')
     try:
         url = urlsplit(value)
+        host = (url.hostname or '').lower()
+        if host.startswith('music.amazon.') or host in ('amzn.to', 'a.co'):
+            raise SoundError('Amazon Musicの直接再生には現在対応していません。/search でYouTubeを検索するか、/sound play で音声ファイルを添付してください。')
         if url.scheme != 'https' or url.username or url.password or url.port:
             raise ValueError()
-        host = (url.hostname or '').lower()
         parts = url.path.strip('/').split('/')
         if host in ('youtu.be', 'www.youtu.be') and len(parts) == 1:
             video_id = parts[0]
@@ -123,7 +126,42 @@ async def load_playlist(url, slots):
         raise SoundError('プレイリストから再生可能な動画を取得できませんでした。') from None
 
 
-async def run_worker(url, destination, playlist=False):
+def normalize_search(query):
+    query = ' '.join(query.split())
+    if not query or len(query) > 200 or any(ord(char) < 32 for char in query):
+        raise SoundError('検索ワードを1〜200文字で入力してください。空白を含むキーワードも使えます。')
+    return query
+
+
+async def search_youtube(query, slots):
+    query = normalize_search(query)
+
+    async def fetch():
+        async with slots:
+            return await run_worker(query, '-', search=True)
+
+    try:
+        output = await asyncio.wait_for(fetch(), timeout=45)
+    except asyncio.TimeoutError:
+        raise SoundError('YouTube検索がタイムアウトしました。時間をおいて再試行してください。') from None
+    try:
+        if len(output) > 32768:
+            raise ValueError()
+        data = json.loads(output)
+        if not data.get('ok'):
+            if data.get('reason') == 'dependency':
+                raise SoundError(ERRORS['dependency'])
+            raise SoundError('YouTubeを検索できませんでした。時間をおいて再試行してください。')
+        entries = data['entries']
+        if not isinstance(entries, list) or len(entries) > SEARCH_LIMIT:
+            raise ValueError()
+        return [{'url': normalize_url(item['url']), 'title': str(item.get('title') or 'YouTube動画')[:150]}
+                for item in entries]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise SoundError('YouTubeの検索結果を読み取れませんでした。時間をおいて再試行してください。') from None
+
+
+async def run_worker(url, destination, playlist=False, search=False):
     worker = Path(__file__).with_name('youtube_worker.py')
     flags = ({'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
              if os.name == 'nt' else {'start_new_session': True})
@@ -131,7 +169,8 @@ async def run_worker(url, destination, playlist=False):
                    if not any(tag in key.upper() for tag in ('TOKEN', 'SECRET', 'API_KEY'))}
     # MWS can add its .packages directory to sys.path at launch time.
     environment['PYTHONPATH'] = os.pathsep.join(os.path.abspath(item or os.getcwd()) for item in sys.path)
-    arguments = [sys.executable, '-u', str(worker), url, str(destination)] + (['playlist'] if playlist else [])
+    mode = ['search'] if search else ['playlist'] if playlist else []
+    arguments = [sys.executable, '-u', str(worker), url, str(destination)] + mode
     process = await asyncio.create_subprocess_exec(*arguments,
         stdout=asyncio.subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment, **flags)
     try:
