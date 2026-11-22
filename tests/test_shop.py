@@ -132,8 +132,8 @@ class ShopUITests(unittest.IsolatedAsyncioTestCase):
         profile = self.store.profile(1, 10)
         view = ShopView(self.service, 10, profile)
         self.assertEqual((view.children[0].min_values, view.children[0].max_values), (1, 1))
-        self.assertEqual(len(view.children[0].options), 3)
-        self.assertEqual(len(self.service.board(profile).fields), 3)
+        self.assertEqual(len(view.children[0].options), 4)
+        self.assertEqual(len(self.service.board(profile).fields), 4)
         interaction = SimpleNamespace(user=SimpleNamespace(id=20), guild=SimpleNamespace(id=1), response=SimpleNamespace(send_message=AsyncMock()))
         self.assertFalse(await view.interaction_check(interaction))
         interaction.user.id = 10
@@ -186,7 +186,7 @@ class ShopUITests(unittest.IsolatedAsyncioTestCase):
 
     async def test_each_category_is_paged_without_missing_or_mixing_products(self):
         profile = self.store.profile(1, 10)
-        self.assertEqual(set(CATEGORIES), {'xp', 'record', 'welcome'})
+        self.assertEqual(set(CATEGORIES), {'xp', 'record', 'welcome', 'ticket'})
         for category in CATEGORIES:
             collected = []
             _, _, pages = category_page(category)

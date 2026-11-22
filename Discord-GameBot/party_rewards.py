@@ -16,6 +16,8 @@ class PartyRewards(ShopStore):
                     if db.execute(f'PRAGMA {name}.journal_mode').fetchone()[0] not in ('delete', 'truncate', 'persist'):
                         raise ValueError('Party rewards require rollback journals')
             db.execute('BEGIN IMMEDIATE')
+            from ticket_store import add_in
+            add_in(db, guild_id, user_id, 'ticket:' + event, 3, 'party')
             previous = self.casino.replay(db, event, guild_id, user_id, 'party_reward')
             if previous is not None:
                 return previous

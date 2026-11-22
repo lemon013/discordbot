@@ -51,6 +51,8 @@ class CasinoStore:
         self.levels = levels
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self.connect()) as db, db:
+            from ticket_store import initialize
+            initialize(db)
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS casino_wallets (
                     guild_id INTEGER NOT NULL,user_id INTEGER NOT NULL,
@@ -152,6 +154,8 @@ class CasinoStore:
         return None
 
     def award_game_xp(self, db, guild_id, user_id, event_id, won):
+        from ticket_store import add_in
+        add_in(db, guild_id, user_id, 'ticket:casino:' + event_id, 1, 'casino')
         if self.levels is None:
             return None
         from solo_rewards import grant_in

@@ -79,6 +79,9 @@ class Game8192View(discord.ui.View):
                 try:
                     reward = (await reward_solo(game.bot, interaction.guild, interaction.channel, game.owner,
                         f'8192:{game.id}:{count}', xp, levels=3 if clear else 0, gems=3000 if clear else 0)) if xp else None
+                    if clear:
+                        from ticket_store import reward_ticket
+                        await reward_ticket(game.bot, interaction.guild, game.owner, 'ticket:8192:' + game.id, 1)
                 except Exception as exc:
                     log.warning('8192 reward save failed (game_id=%s, error_type=%s)', game.id, type(exc).__name__)
                     await interaction.followup.send('報酬を保存できませんでした。同じ扉をもう一度押すと再試行できます。', ephemeral=True)
@@ -97,6 +100,12 @@ class Game8192View(discord.ui.View):
                     embed, view = game_embed(count), Game8192View(game)
                 text = f'✅ 正解！ +{xp} XP' if xp else '✅ 正解！XPは1/4到達からもらえます。'
             else:
+                try:
+                    from ticket_store import reward_ticket
+                    await reward_ticket(game.bot, interaction.guild, game.owner, 'ticket:8192:' + game.id, 1)
+                except Exception:
+                    await interaction.followup.send('チケットの保存に失敗しました。同じボタンで再試行してください。', ephemeral=True)
+                    return
                 game.close()
                 embed = discord.Embed(title='❌ GAME OVER',
                     description=f'連続正解：{self.count}回\n挑戦した確率：1/{2 ** (self.count + 1):,}\n獲得済みのXPは保持されます。',
@@ -142,4 +151,7 @@ def register_8192(bot):
             game.close()
             view.stop()
             raise
+    alias = app_commands.Command(name='8192games', description='1/8192ゲーム（/8192game と同じ）', callback=start.callback)
+    alias.guild_only = True
+    bot.tree.add_command(alias)
     return games

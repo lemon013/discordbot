@@ -138,3 +138,6 @@ def register_tensei(bot):
         view.message = await interaction.edit_original_response(
             embed=life_embed(generate_life(), interaction.user.display_name), view=view,
             allowed_mentions=discord.AllowedMentions.none())
+        if getattr(bot, 'ticket_store', None) is not None:
+            from ticket_store import reward_ticket
+            await reward_ticket(bot, interaction.guild, interaction.user.id, 'ticket:tensei:' + str(interaction.id), 1)

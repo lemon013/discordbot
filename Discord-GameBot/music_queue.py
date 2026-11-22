@@ -3,6 +3,7 @@ import asyncio
 from collections import deque
 from dataclasses import dataclass, field
 import logging
+import uuid
 from types import SimpleNamespace
 
 import discord
@@ -23,6 +24,8 @@ def safe_title(value):
 class Track:
     url: str
     title: str = ''
+    requester_id: int = 0
+    ticket_event: str = field(default_factory=lambda: 'ticket:play:' + uuid.uuid4().hex)
 
     def label(self):
         return f'[{safe_title(self.title or self.url.rsplit("=", 1)[-1])}]({self.url})'
@@ -237,6 +240,8 @@ class Music:
                     session.error = ''
                     self.refresh(session)
                     audio = YouTubeAudio(session.current.url, self.slots)
+                    if session.current.requester_id:
+                        audio.ticket_award = (session.current.requester_id, session.current.ticket_event, 3)
                     try:
                         await self.sound.play(PlaybackContext(self, session), session.channel, audio)
                     except asyncio.CancelledError:
@@ -335,7 +340,7 @@ class Music:
             accepted = entries[:room]
             if not accepted:
                 raise SoundError('キューがいっぱいになりました。曲が減ってから追加してください。')
-            session.queue.extend(Track(item['url'], item['title']) for item in accepted)
+            session.queue.extend(Track(item['url'], item['title'], interaction.user.id) for item in accepted)
             self.sound.cancel_idle(session.guild.id)
             self.kick(session)
             self.refresh(session)

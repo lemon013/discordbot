@@ -631,6 +631,8 @@ from leveling import register_leveling
 bot.leveling_service = register_leveling(bot)
 from casino import register_casino
 casino_service = register_casino(bot)
+from tickets import register_tickets
+register_tickets(bot, casino_service.store)
 from solo_rewards import SoloRewards
 bot.solo_rewards = SoloRewards(casino_service.store, bot.leveling_service.store)
 from shop import register_shop

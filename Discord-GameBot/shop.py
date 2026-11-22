@@ -27,6 +27,7 @@ ATTACHMENT_NAME = 'shop-entitlements.json'
 PAGE_SIZE = 10
 CATEGORIES = {
     'xp': ('経験値アップ', '✨', 'Discordの経験値を増やします。'),
+    'ticket': ('スペシャルチケット', '🎟️', '500ジュエルで抽選1口分のチケット1枚を購入できます。'),
     'record': ('レコード', '🎵', 'Minecraft参加時に効果音を流します。'),
     'welcome': ('ようこそメッセージ', '💬', 'Minecraft参加時に歓迎文を流します。'),
 }
@@ -106,7 +107,11 @@ class ShopStore:
             if wallet['balance'] < price:
                 raise ShopError(f"ジュエルが足りません。必要：💎 {price:,} / 残高：💎 {wallet['balance']:,}")
             result = dict(item_id=item_id, price=price, balance=wallet['balance'] - price, equipped=bool(owned))
-            if item['kind'] == 'xp':
+            if item['kind'] == 'ticket':
+                from ticket_store import add_in
+                add_in(db, guild_id, user_id, 'ticket:shop:' + event_id, 1, 'purchase')
+                result['tickets'] = 1
+            elif item['kind'] == 'xp':
                 cfg_row = db.execute(f'SELECT * FROM {alias}.level_config WHERE guild_id=?', (guild_id,)).fetchone()
                 cfg = {**DEFAULTS, **(dict(cfg_row) if cfg_row else {})}
                 db.execute(f'INSERT OR IGNORE INTO {alias}.level_users(guild_id,user_id) VALUES(?,?)', (guild_id, user_id))
@@ -202,6 +207,8 @@ class ShopService:
             return
         item = ITEMS[item_id]
         message = f"✅ {item['name']}を{'装備' if result['equipped'] else '購入'}しました！\n支払い：💎 {result['price']:,} / 残高：💎 {result['balance']:,}"
+        if item['kind'] == 'ticket':
+            message += '\n🎟️ スペシャルチケット +1枚（/ticket balance で確認）'
         profile = await asyncio.to_thread(self.store.profile, interaction.guild_id, interaction.user.id)
         await interaction.edit_original_response(content=message, embed=self.board(profile, item['kind'], page), view=ShopView(self, interaction.user.id, profile, category=item['kind'], page=page),
                                                  allowed_mentions=discord.AllowedMentions.none())
@@ -210,7 +217,7 @@ class ShopService:
             if leveling:
                 cfg = await asyncio.to_thread(leveling.store.config, interaction.guild_id)
                 await leveling.notify(interaction.guild, [dict(user_id=interaction.user.id, before=result['before'], after=result['after'])], cfg, interaction.channel)
-        else:
+        elif item['kind'] in ('record', 'welcome'):
             try:
                 synced = await self.sync(interaction.guild_id)
                 if not synced:

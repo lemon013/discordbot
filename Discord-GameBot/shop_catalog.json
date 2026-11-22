@@ -1,5 +1,12 @@
 [
   {
+    "id": "special_ticket",
+    "name": "🎟️ スペシャルチケット1枚",
+    "kind": "ticket",
+    "price": 500,
+    "description": "1枚＝抽選1口のスペシャルチケット。購入するたびに1枚増えます。再起動しても保持されます。"
+  },
+  {
     "id": "xp5",
     "name": "5XPアップ",
     "kind": "xp",

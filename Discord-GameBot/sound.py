@@ -99,6 +99,8 @@ class UploadedAudio(discord.AudioSource):
         self.frames = self.audio_bytes = self.skipped_headers = 0
         self.guild_id = None
         self.playback_error = None
+        self.completed = False
+        self.ticket_award = None
 
     def read(self):
         data = self.source.read()
@@ -110,6 +112,8 @@ class UploadedAudio(discord.AudioSource):
             self.audio_bytes += len(data)
             if self.frames == 1:
                 log.info('Sound audio frames started (guild_id=%s)', self.guild_id)
+        if not data:
+            self.completed = not bool(self._current_error)
         return data
 
     @property
@@ -223,6 +227,14 @@ class Sound:
             self.idle_tasks[guild.id] = asyncio.create_task(self.idle_disconnect(guild))
         if self.music is not None:
             self.music.on_finished(guild, source)
+        award = getattr(source, 'ticket_award', None)
+        if award and getattr(source, 'completed', False) and source.frames > 0 and not source.playback_error:
+            from ticket_store import reward_ticket
+            try:
+                user_id, event_id, amount = award
+                await reward_ticket(self.bot, guild, user_id, event_id, amount)
+            except Exception:
+                log.error('Playback completed but ticket reward is pending (guild_id=%s)', guild.id)
 
     def playback_status(self, guild):
         voice = guild.voice_client
@@ -329,6 +341,7 @@ class Sound:
                 before_options='-nostdin -protocol_whitelist file,pipe',
                 options='-vn -map 0:a:0 -frame_duration 20 -application audio', stderr=error_output)
             source = UploadedAudio(inner, directory, cleanup_complete, stderr=error_output)
+            source.ticket_award = getattr(attachment, 'ticket_award', None)
             source.guild_id = guild.id
             source.title = attachment.filename
 
@@ -387,6 +400,9 @@ class Sound:
                 if action in ('play', 'test'):
                     if action == 'test':
                         attachment = await asyncio.to_thread(make_test_tone)
+                    elif getattr(self.bot, 'ticket_store', None) is not None and getattr(attachment, 'ticket_eligible', True):
+                        from ticket_store import RewardAudio
+                        attachment = RewardAudio(attachment, interaction.user.id, 'ticket:sound:' + str(interaction.id), 1)
                     answer = await self.play(interaction, channel, attachment)
                 else:
                     voice = interaction.guild.voice_client

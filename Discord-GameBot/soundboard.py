@@ -28,6 +28,7 @@ CLIPS = (
 
 @dataclass(frozen=True)
 class PackagedClip:
+    ticket_eligible = False
     path: Path
     filename: str
     size: int

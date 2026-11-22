@@ -58,7 +58,11 @@ class SoloRewards:
         with closing(self.casino.connect()) as db, db:
             alias = attach_levels(db, self.casino, self.levels)
             db.execute('BEGIN IMMEDIATE')
-            return grant_in(db, self.casino, alias, guild_id, user_id, event_id, xp, levels, gems)
+            result = grant_in(db, self.casino, alias, guild_id, user_id, event_id, xp, levels, gems)
+            if event_id.startswith(('solo:aki:', 'solo:kakigoori:')):
+                from ticket_store import add_in
+                add_in(db, guild_id, user_id, 'ticket:' + event_id, 1, 'solo')
+            return result
 
 
 async def notify_solo(bot, guild, channel, result):

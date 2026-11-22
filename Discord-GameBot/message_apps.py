@@ -89,6 +89,9 @@ def register_message_apps(bot):
             await interaction.edit_original_response(
                 content='返信できませんでした。対象メッセージの削除や、Botの送信・履歴閲覧権限を確認してください。')
             return
+        if getattr(bot, 'ticket_store', None) is not None:
+            from ticket_store import reward_ticket
+            await reward_ticket(bot, interaction.guild, interaction.user.id, 'ticket:kosen:' + str(interaction.id), 1)
         await interaction.edit_original_response(content='対象メッセージに診断結果を返信しました。')
 
     bot.tree.add_command(app_commands.ContextMenu(name='メッセージ通報', callback=report_message))

@@ -75,6 +75,20 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(20):
             await asyncio.sleep(0)
 
+    async def test_play_reward_owner_is_preserved_and_loop_keeps_same_reward_event(self):
+        interaction = self.call(uid=55)
+        await self.music.enqueue(interaction, URL_A)
+        await self.settle()
+        session = self.music.sessions[1]
+        audio = self.sound.play.call_args.args[2]
+        self.assertEqual((audio.ticket_award[0], audio.ticket_award[2]), (55, 3))
+        track = session.current
+        session.loop_mode = 'track'
+        self.sound.playing.pop(1)
+        self.music.on_finished(self.guild, session.source)
+        await self.settle()
+        self.assertEqual(self.sound.play.call_args.args[2].ticket_award[1], track.ticket_event)
+
     async def test_search_button_from_text_channel_adds_selected_url_to_callers_vc_queue(self):
         self.guild.voice_client = self.voice
         self.sound.playing[1] = SimpleNamespace(title='Existing music')

@@ -210,6 +210,7 @@ class VoiceHub:
             inner = discord.FFmpegPCMAudio(str(path), executable=executable,
                 before_options='-nostdin -protocol_whitelist file,pipe', options=options, stderr=error_output)
             source = UploadedAudio(inner, directory, finished, stderr=error_output)
+            source.ticket_award = getattr(attachment, 'ticket_award', None)
             source.guild_id, source.title = guild.id, attachment.filename
             self.counter += 1
             key = f'board:{self.counter}' if lane == 'board' else lane
