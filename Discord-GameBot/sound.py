@@ -144,6 +144,11 @@ class Sound:
         self.preparing, self.connecting = set(), {}
         self.last_stats = {}
         self.music = None
+        self.hub = None
+        self.tts = None
+
+    def music_voice(self, guild):
+        return self.hub.music_voice(guild) if self.hub else guild.voice_client
 
     def lock(self, guild_id):
         return self.locks.setdefault(guild_id, asyncio.Lock())
@@ -248,7 +253,10 @@ class Sound:
                 if (voice and voice.is_connected() and guild.id not in self.playing
                         and guild.id not in self.preparing and guild.id not in self.connecting
                         and not (self.music is not None and self.music.has_work(guild.id))
-                        and not voice.is_playing() and not voice.is_paused()):
+                        and not (self.hub and self.hub.busy(guild.id))
+                        and (self.hub or (not voice.is_playing() and not voice.is_paused()))):
+                    if self.hub:
+                        self.hub.close(guild.id)
                     await voice.disconnect(force=True)
         except asyncio.CancelledError:
             pass
@@ -259,6 +267,9 @@ class Sound:
                 self.idle_tasks.pop(guild.id, None)
 
     async def play(self, interaction, channel, attachment):
+        if self.hub:
+            await self.hub.play(interaction, channel, attachment)
+            return '▶️ 音声を再生しています。'
         suffix = Path(attachment.filename).suffix.lower()
         if suffix not in EXTENSIONS:
             raise SoundError('MP3・WAV・OGG・OPUS・M4A・AAC・FLAC・WEBM・MP4のファイルを添付してください。MP4は音声のみ再生します。')
@@ -386,7 +397,7 @@ class Sound:
                     if action == 'stop':
                         if self.music is not None:
                             self.music.clear(guild_id=interaction.guild.id)
-                        voice.stop()
+                        self.music_voice(interaction.guild).stop()
                         self.cancel_idle(interaction.guild.id)
                         self.idle_tasks[interaction.guild.id] = asyncio.create_task(self.idle_disconnect(interaction.guild))
                         answer = '⏹️ 再生を停止しました。60秒で自動退出します。'
@@ -395,6 +406,10 @@ class Sound:
                             self.music.clear(guild_id=interaction.guild.id)
                         self.cancel_idle(interaction.guild.id)
                         self.playing.pop(interaction.guild.id, None)
+                        if self.tts:
+                            await self.tts.halt(interaction.guild.id)
+                        if self.hub:
+                            self.hub.close(interaction.guild.id)
                         await voice.disconnect(force=True)
                         answer = 'VCから退出しました。'
         except SoundError as exc:

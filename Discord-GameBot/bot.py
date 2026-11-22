@@ -651,6 +651,8 @@ from youtube_play import register_youtube_play
 register_youtube_play(bot, sound_service)
 from soundboard import register_soundboard
 register_soundboard(bot, sound_service)
+from voice_reading import register_voice
+register_voice(bot, sound_service)
 from ping import register_ping
 register_ping(bot)
 

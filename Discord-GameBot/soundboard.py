@@ -50,7 +50,10 @@ class ClipButton(discord.ui.Button):
                 ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
             return
         # The player checks VC membership, permissions and its shared guild lock.
-        await self.service.invoke(interaction, 'play', clip)
+        if getattr(self.service, 'hub', None):
+            await self.service.hub.board(interaction, clip)
+        else:
+            await self.service.invoke(interaction, 'play', clip)
 
 
 class SoundboardView(discord.ui.View):
@@ -63,7 +66,7 @@ class SoundboardView(discord.ui.View):
 def panel_embed():
     return discord.Embed(title='🔊 サウンドボード', colour=discord.Colour.blue(),
         description='このVCに参加して、セリフのボタンを押してください。\n'
-                    '再生中は次の音声を流せません。停止は `/sound stop`。\n'
+                    '音楽・読み上げと重ねて再生できます。\n'
                     '再生終了から60秒でBotが自動退出します。')
 
 

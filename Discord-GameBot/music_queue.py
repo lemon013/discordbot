@@ -117,7 +117,7 @@ class Music:
         return previous
 
     def embed(self, session):
-        voice = session.guild.voice_client
+        voice = self.sound.music_voice(session.guild)
         source = self.sound.playing.get(session.guild.id)
         if voice and voice.is_paused():
             status = '⏸️ 一時停止中'
@@ -359,7 +359,7 @@ class Music:
                 raise SoundError('切り替え中です。少しお待ちください。')
             async with session.control_lock:
                 if action in ('loop_track', 'loop_queue'):
-                    voice = session.guild.voice_client
+                    voice = self.sound.music_voice(session.guild)
                     if voice and voice.is_connected() and voice.channel.id != session.channel.id:
                         raise SoundError('Botが参加しているVCで操作してください。')
                     mode = 'track' if action == 'loop_track' else 'queue'
@@ -380,7 +380,7 @@ class Music:
                 if self.sound.lock(session.guild.id).locked():
                     raise SoundError('音声の準備・操作中です。少し待ってから操作してください。')
                 async with self.sound.lock(session.guild.id):
-                    voice = session.guild.voice_client
+                    voice = self.sound.music_voice(session.guild)
                     if voice and voice.is_connected() and voice.channel.id != session.channel.id:
                         raise SoundError('Botが参加しているVCで操作してください。')
                     if action == 'skip':
