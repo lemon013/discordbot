@@ -19,6 +19,7 @@ from discord import app_commands
 from sound import SoundError, MAX_BYTES
 from storage import database_path
 from voice_mixer import VoiceHub
+from quest_voice import QuestVoice, VOICES, REVIEWED_NAMES
 
 log = logging.getLogger(__name__)
 CREDIT = 'クレジットはBotのプロフィール欄を参照してください。'
@@ -58,6 +59,7 @@ class Providers:
         self.credentials = None
         self.auth_lock = asyncio.Lock()
         self.slots = asyncio.Semaphore(2)
+        self.quest = QuestVoice()
 
     async def headers(self):
         if self.key:
@@ -93,10 +95,10 @@ class Providers:
             return cached[1]
         if provider == 'voicevox':
             if not self.base:
-                raise SoundError('VOICEVOX_URLが未設定です。管理者が音声エンジンの接続先を設定してください。')
+                return dict(VOICES)
             data = json.loads(await self.request('GET', self.base + '/speakers'))
             voices = {str(style['id']): f'{speaker["name"]}（{style["name"]}）'
-                      for speaker in data if speaker['name'] in ('ずんだもん', '四国めたん')
+                      for speaker in data if speaker['name'] in REVIEWED_NAMES
                       for style in speaker['styles']}
         else:
             data = json.loads(await self.request('GET', 'https://texttospeech.googleapis.com/v1/voices',
@@ -112,6 +114,8 @@ class Providers:
 
     async def synthesize(self, text, preference):
         provider, voice, speed = preference['provider'], preference['voice'], preference['speed']
+        if provider == 'voicevox' and not self.base:
+            return await self.quest.synthesize(text, voice)
         catalog = await self.voices(provider)
         if voice not in catalog:
             raise SoundError('保存した声が見つかりません。/voice change で選び直してください。')
@@ -207,6 +211,13 @@ class Reading:
         async with self.sound.lock(interaction.guild.id):
             self.channel(interaction)
             await self.hub.ensure(interaction.guild, channel, expected=generation)
+            if not self.providers.base and self.sessions.get(interaction.guild.id) != channel.id:
+                try:
+                    await asyncio.wait_for(channel.send('🔊 読み上げを開始します。このVCのチャット本文を、非公式のWEB版VOICEVOX API（tts.quest）へ送信して音声を生成します。' + CREDIT,
+                        allowed_mentions=discord.AllowedMentions.none()), 5)
+                except BaseException:
+                    self.hub.arm_idle(interaction.guild)
+                    raise
             self.sessions[interaction.guild.id] = channel.id
             self.hub.reading.add(interaction.guild.id)
         return '🔊 このVCのチャットの読み上げを開始しました。' + CREDIT
@@ -239,10 +250,12 @@ class Reading:
             self.workers[guild.id] = asyncio.create_task(self.consume(guild), name='voice-reading')
 
     async def speak(self, guild, message, text):
-        data = await self.providers.synthesize(text, self.preference(message.author.id))
+        preference = self.preference(message.author.id)
+        data = await self.providers.synthesize(text, preference)
         async def save(path):
             await asyncio.to_thread(Path(path).write_bytes, data)
-        attachment = SimpleNamespace(filename='reading.wav', size=len(data), save=save)
+        attachment = SimpleNamespace(filename='reading.wav', size=len(data), save=save,
+            tempo=preference['speed'] if not self.providers.base else 1.0)
         state = getattr(message.author, 'voice', None)
         if self.sessions.get(guild.id) != message.channel.id or not state or not state.channel or state.channel.id != message.channel.id:
             return
@@ -479,7 +492,7 @@ def register_voice(bot, sound):
             service.admin(interaction)
             from voice_diagnostics import snapshot, describe
             data = await asyncio.to_thread(snapshot, service.store.path.parent)
-            return describe(data, bool(service.providers.base))
+            return describe(data, True) + '\n音声生成：' + ('設定済みVOICEVOXエンジン' if service.providers.base else '非公式WEB版VOICEVOX API（tts.quest）')
         await run(interaction, op)
 
     diagnosed = False
@@ -490,7 +503,7 @@ def register_voice(bot, sound):
         diagnosed = True
         from voice_diagnostics import snapshot, describe
         data = await asyncio.to_thread(snapshot, service.store.path.parent)
-        log.info('VOICEVOX runtime diagnostics:\n%s', describe(data, bool(service.providers.base)))
+        log.info('VOICEVOX runtime diagnostics:\n%s', describe(data, True))
     bot.add_listener(ready_diagnostics, 'on_ready')
     bot.add_listener(service.on_message, 'on_message')
     bot.add_listener(service.on_voice_state_update, 'on_voice_state_update')

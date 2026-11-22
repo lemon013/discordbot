@@ -244,6 +244,22 @@ class ReadingTests(unittest.IsolatedAsyncioTestCase):
             await pending
         self.sound.connect_voice.assert_not_awaited()
 
+    async def test_reading_speed_is_applied_with_ffmpeg_atempo(self):
+        running = []
+        self.guild.voice_client = NS(channel=self.channel, is_connected=lambda: True,
+                                    is_playing=lambda: bool(running), play=running.append)
+        tone = make_test_tone()
+        tone.tempo = 2.0
+        _, key = await self.service.hub.play(self.interaction, self.channel, tone, 'board')
+        mixer = self.service.hub.mixers[1]
+        source = mixer.sources[key]
+        def drain():
+            while key in mixer.sources:
+                mixer.read()
+        await asyncio.to_thread(drain)
+        self.assertGreater(source.frames, 65)
+        self.assertLess(source.frames, 90)  # Original is 150 frames / 3 seconds.
+
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_voicevox_catalog_is_limited_to_reviewed_characters_and_speed_is_sent(self):

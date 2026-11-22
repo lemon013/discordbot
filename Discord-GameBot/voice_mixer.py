@@ -203,8 +203,12 @@ class VoiceHub:
                 except RuntimeError:
                     pass
             error_output = open(os.devnull, 'wb')
+            tempo = float(getattr(attachment, 'tempo', 1.0))
+            if not 0.5 <= tempo <= 2.0:
+                raise SoundError('読み上げ速度は0.5〜2.0倍で指定してください。')
+            options = '-vn -map 0:a:0' + (f' -af atempo={tempo:g}' if tempo != 1.0 else '')
             inner = discord.FFmpegPCMAudio(str(path), executable=executable,
-                before_options='-nostdin -protocol_whitelist file,pipe', options='-vn -map 0:a:0', stderr=error_output)
+                before_options='-nostdin -protocol_whitelist file,pipe', options=options, stderr=error_output)
             source = UploadedAudio(inner, directory, finished, stderr=error_output)
             source.guild_id, source.title = guild.id, attachment.filename
             self.counter += 1
