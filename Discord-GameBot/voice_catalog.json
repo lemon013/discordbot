@@ -1,0 +1,823 @@
+{
+  "source": "https://github.com/VOICEVOX/voicevox_vvm/blob/main/README.md",
+  "checked_on": "2026-11-22",
+  "characters": [
+    {
+      "name": "四国めたん",
+      "credit": "VOICEVOX:四国めたん",
+      "terms": "https://zunko.jp/con_ongen_kiyaku.html",
+      "note": "",
+      "styles": [
+        {
+          "id": "2",
+          "name": "ノーマル"
+        },
+        {
+          "id": "0",
+          "name": "あまあま"
+        },
+        {
+          "id": "6",
+          "name": "ツンツン"
+        },
+        {
+          "id": "4",
+          "name": "セクシー"
+        },
+        {
+          "id": "36",
+          "name": "ささやき"
+        },
+        {
+          "id": "37",
+          "name": "ヒソヒソ"
+        }
+      ]
+    },
+    {
+      "name": "ずんだもん",
+      "credit": "VOICEVOX:ずんだもん",
+      "terms": "https://zunko.jp/con_ongen_kiyaku.html",
+      "note": "",
+      "styles": [
+        {
+          "id": "3",
+          "name": "ノーマル"
+        },
+        {
+          "id": "1",
+          "name": "あまあま"
+        },
+        {
+          "id": "7",
+          "name": "ツンツン"
+        },
+        {
+          "id": "5",
+          "name": "セクシー"
+        },
+        {
+          "id": "22",
+          "name": "ささやき"
+        },
+        {
+          "id": "38",
+          "name": "ヒソヒソ"
+        },
+        {
+          "id": "75",
+          "name": "ヘロヘロ"
+        },
+        {
+          "id": "76",
+          "name": "なみだめ"
+        }
+      ]
+    },
+    {
+      "name": "春日部つむぎ",
+      "credit": "VOICEVOX:春日部つむぎ",
+      "terms": "https://tsumugi-official.studio.site/rule",
+      "note": "",
+      "styles": [
+        {
+          "id": "8",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "雨晴はう",
+      "credit": "VOICEVOX:雨晴はう",
+      "terms": "https://amehau.com/rules/amehare-hau-rule",
+      "note": "音声のR18指定利用は禁止です。",
+      "styles": [
+        {
+          "id": "10",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "冥鳴ひまり",
+      "credit": "VOICEVOX:冥鳴ひまり",
+      "terms": "https://meimeihimari.wixsite.com/himari/terms-of-use",
+      "note": "",
+      "styles": [
+        {
+          "id": "14",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "九州そら",
+      "credit": "VOICEVOX:九州そら",
+      "terms": "https://zunko.jp/con_ongen_kiyaku.html",
+      "note": "",
+      "styles": [
+        {
+          "id": "16",
+          "name": "ノーマル"
+        },
+        {
+          "id": "15",
+          "name": "あまあま"
+        },
+        {
+          "id": "18",
+          "name": "ツンツン"
+        },
+        {
+          "id": "17",
+          "name": "セクシー"
+        },
+        {
+          "id": "19",
+          "name": "ささやき"
+        }
+      ]
+    },
+    {
+      "name": "波音リツ",
+      "credit": "VOICEVOX:波音リツ",
+      "terms": "http://canon-voice.com/kiyaku.html",
+      "note": "",
+      "styles": [
+        {
+          "id": "9",
+          "name": "ノーマル"
+        },
+        {
+          "id": "65",
+          "name": "クイーン"
+        }
+      ]
+    },
+    {
+      "name": "中国うさぎ",
+      "credit": "VOICEVOX:中国うさぎ",
+      "terms": "https://zunko.jp/con_ongen_kiyaku.html",
+      "note": "",
+      "styles": [
+        {
+          "id": "61",
+          "name": "ノーマル"
+        },
+        {
+          "id": "62",
+          "name": "おどろき"
+        },
+        {
+          "id": "63",
+          "name": "こわがり"
+        },
+        {
+          "id": "64",
+          "name": "へろへろ"
+        }
+      ]
+    },
+    {
+      "name": "玄野武宏",
+      "credit": "VOICEVOX:玄野武宏",
+      "terms": "https://www.virvoxproject.com/voicevoxの利用規約",
+      "note": "",
+      "styles": [
+        {
+          "id": "11",
+          "name": "ノーマル"
+        },
+        {
+          "id": "39",
+          "name": "喜び"
+        },
+        {
+          "id": "40",
+          "name": "ツンギレ"
+        },
+        {
+          "id": "41",
+          "name": "悲しみ"
+        }
+      ]
+    },
+    {
+      "name": "剣崎雌雄",
+      "credit": "VOICEVOX:剣崎雌雄",
+      "terms": "https://frontier.creatia.cc/fanclubs/413/posts/4507",
+      "note": "",
+      "styles": [
+        {
+          "id": "21",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "No.7",
+      "credit": "VOICEVOX:No.7",
+      "terms": "https://voiceseven.com/#j0200",
+      "note": "個人・非商用向け。その他の商用利用は権利者へ事前確認してください。",
+      "styles": [
+        {
+          "id": "29",
+          "name": "ノーマル"
+        },
+        {
+          "id": "30",
+          "name": "アナウンス"
+        },
+        {
+          "id": "31",
+          "name": "読み聞かせ"
+        }
+      ]
+    },
+    {
+      "name": "後鬼",
+      "credit": "VOICEVOX:後鬼",
+      "terms": "https://ついなちゃん.com/voicevox_terms/",
+      "note": "企業での商用利用は権利者へ事前確認してください。",
+      "styles": [
+        {
+          "id": "27",
+          "name": "人間ver."
+        },
+        {
+          "id": "28",
+          "name": "ぬいぐるみver."
+        },
+        {
+          "id": "87",
+          "name": "人間（怒り）ver."
+        },
+        {
+          "id": "88",
+          "name": "鬼ver."
+        }
+      ]
+    },
+    {
+      "name": "WhiteCUL",
+      "credit": "VOICEVOX:WhiteCUL",
+      "terms": "https://www.whitecul.com/guideline",
+      "note": "",
+      "styles": [
+        {
+          "id": "23",
+          "name": "ノーマル"
+        },
+        {
+          "id": "24",
+          "name": "たのしい"
+        },
+        {
+          "id": "25",
+          "name": "かなしい"
+        },
+        {
+          "id": "26",
+          "name": "びえーん"
+        }
+      ]
+    },
+    {
+      "name": "白上虎太郎",
+      "credit": "VOICEVOX:白上虎太郎",
+      "terms": "https://www.virvoxproject.com/voicevoxの利用規約",
+      "note": "",
+      "styles": [
+        {
+          "id": "12",
+          "name": "ふつう"
+        },
+        {
+          "id": "32",
+          "name": "わーい"
+        },
+        {
+          "id": "33",
+          "name": "びくびく"
+        },
+        {
+          "id": "34",
+          "name": "おこ"
+        },
+        {
+          "id": "35",
+          "name": "びえーん"
+        }
+      ]
+    },
+    {
+      "name": "ちび式じい",
+      "credit": "VOICEVOX:ちび式じい",
+      "terms": "https://docs.google.com/presentation/d/1AcD8zXkfzKFf2ertHwWRwJuQXjNnijMxhz7AJzEkaI4",
+      "note": "",
+      "styles": [
+        {
+          "id": "42",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "櫻歌ミコ",
+      "credit": "VOICEVOX:櫻歌ミコ",
+      "terms": "https://voicevox35miko.studio.site/rule",
+      "note": "",
+      "styles": [
+        {
+          "id": "43",
+          "name": "ノーマル"
+        },
+        {
+          "id": "44",
+          "name": "第二形態"
+        },
+        {
+          "id": "45",
+          "name": "ロリ"
+        }
+      ]
+    },
+    {
+      "name": "ナースロボ＿タイプＴ",
+      "credit": "VOICEVOX:ナースロボ＿タイプＴ",
+      "terms": "https://www.krnr.top/rules",
+      "note": "AI生成画像・動画への声当てとR18音声利用は禁止です。",
+      "styles": [
+        {
+          "id": "47",
+          "name": "ノーマル"
+        },
+        {
+          "id": "48",
+          "name": "楽々"
+        },
+        {
+          "id": "49",
+          "name": "恐怖"
+        },
+        {
+          "id": "50",
+          "name": "内緒話"
+        }
+      ]
+    },
+    {
+      "name": "†聖騎士 紅桜†",
+      "credit": "VOICEVOX:†聖騎士 紅桜†",
+      "terms": "https://commons.nicovideo.jp/material/nc296132",
+      "note": "",
+      "styles": [
+        {
+          "id": "51",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "雀松朱司",
+      "credit": "VOICEVOX:雀松朱司",
+      "terms": "https://www.virvoxproject.com/voicevoxの利用規約",
+      "note": "",
+      "styles": [
+        {
+          "id": "52",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "麒ヶ島宗麟",
+      "credit": "VOICEVOX:麒ヶ島宗麟",
+      "terms": "https://www.virvoxproject.com/voicevoxの利用規約",
+      "note": "",
+      "styles": [
+        {
+          "id": "53",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "春歌ナナ",
+      "credit": "VOICEVOX:春歌ナナ",
+      "terms": "https://nanahira.jp/haruka_nana/guideline.html",
+      "note": "",
+      "styles": [
+        {
+          "id": "54",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "猫使アル",
+      "credit": "VOICEVOX:猫使アル",
+      "terms": "https://nekotukarb.wixsite.com/nekonohako/利用規約",
+      "note": "企業による商用利用は事前連絡が必要です。R18での音声単独使用は禁止です。",
+      "styles": [
+        {
+          "id": "55",
+          "name": "ノーマル"
+        },
+        {
+          "id": "56",
+          "name": "おちつき"
+        },
+        {
+          "id": "57",
+          "name": "うきうき"
+        },
+        {
+          "id": "110",
+          "name": "つよつよ"
+        },
+        {
+          "id": "111",
+          "name": "へろへろ"
+        }
+      ]
+    },
+    {
+      "name": "猫使ビィ",
+      "credit": "VOICEVOX:猫使ビィ",
+      "terms": "https://nekotukarb.wixsite.com/nekonohako/利用規約",
+      "note": "企業による商用利用は事前連絡が必要です。R18での音声単独使用は禁止です。",
+      "styles": [
+        {
+          "id": "58",
+          "name": "ノーマル"
+        },
+        {
+          "id": "59",
+          "name": "おちつき"
+        },
+        {
+          "id": "60",
+          "name": "人見知り"
+        },
+        {
+          "id": "112",
+          "name": "つよつよ"
+        }
+      ]
+    },
+    {
+      "name": "栗田まろん",
+      "credit": "VOICEVOX:栗田まろん",
+      "terms": "https://aivoice.jp/character/maron/",
+      "note": "",
+      "styles": [
+        {
+          "id": "67",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "あいえるたん",
+      "credit": "VOICEVOX:あいえるたん",
+      "terms": "https://www.infiniteloop.co.jp/special/iltan/terms/",
+      "note": "",
+      "styles": [
+        {
+          "id": "68",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "満別花丸",
+      "credit": "VOICEVOX:満別花丸",
+      "terms": "https://100hanamaru.wixsite.com/manbetsu-hanamaru/rule",
+      "note": "",
+      "styles": [
+        {
+          "id": "69",
+          "name": "ノーマル"
+        },
+        {
+          "id": "70",
+          "name": "元気"
+        },
+        {
+          "id": "71",
+          "name": "ささやき"
+        },
+        {
+          "id": "72",
+          "name": "ぶりっ子"
+        },
+        {
+          "id": "73",
+          "name": "ボーイ"
+        }
+      ]
+    },
+    {
+      "name": "琴詠ニア",
+      "credit": "VOICEVOX:琴詠ニア",
+      "terms": "https://commons.nicovideo.jp/works/nc315435",
+      "note": "",
+      "styles": [
+        {
+          "id": "74",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "青山龍星",
+      "credit": "VOICEVOX:青山龍星",
+      "terms": "https://www.virvoxproject.com/voicevoxの利用規約",
+      "note": "企業・個人事業主・企業スポンサー関連の利用は事前申請が必要です。",
+      "styles": [
+        {
+          "id": "13",
+          "name": "ノーマル"
+        },
+        {
+          "id": "81",
+          "name": "熱血"
+        },
+        {
+          "id": "82",
+          "name": "不機嫌"
+        },
+        {
+          "id": "83",
+          "name": "喜び"
+        },
+        {
+          "id": "84",
+          "name": "しっとり"
+        },
+        {
+          "id": "85",
+          "name": "かなしみ"
+        },
+        {
+          "id": "86",
+          "name": "囁き"
+        }
+      ]
+    },
+    {
+      "name": "もち子さん",
+      "credit": "VOICEVOX:もち子さん(cv 明日葉よもぎ)",
+      "terms": "https://vtubermochio.wixsite.com/mochizora/利用規約",
+      "note": "個人・非商用の読み上げ向け。商用・音声作品配布・ゲーム利用には個別条件があります。声優名の表記が必要です。",
+      "styles": [
+        {
+          "id": "20",
+          "name": "ノーマル"
+        },
+        {
+          "id": "66",
+          "name": "セクシー／あん子"
+        },
+        {
+          "id": "77",
+          "name": "泣き"
+        },
+        {
+          "id": "78",
+          "name": "怒り"
+        },
+        {
+          "id": "79",
+          "name": "喜び"
+        },
+        {
+          "id": "80",
+          "name": "のんびり"
+        }
+      ],
+      "api_name": "もち子(cv 明日葉よもぎ)"
+    },
+    {
+      "name": "小夜/SAYO",
+      "credit": "VOICEVOX:小夜/SAYO",
+      "terms": "https://316soramegu.wixsite.com/sayo-official/guideline",
+      "note": "",
+      "styles": [
+        {
+          "id": "46",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "Voidoll",
+      "credit": "VOICEVOX:Voidoll(CV:丹下桜)",
+      "terms": "https://blog.nicovideo.jp/niconews/224589.html",
+      "note": "法人利用は事前確認が必要です。CV:丹下桜を表記してください。",
+      "styles": [
+        {
+          "id": "89",
+          "name": "ノーマル"
+        }
+      ],
+      "api_name": "Voidoll(CV:丹下桜)"
+    },
+    {
+      "name": "ぞん子",
+      "credit": "VOICEVOX:ぞん子",
+      "terms": "https://zonko.zone-energy.jp/guideline",
+      "note": "商用利用は権利者へ事前確認してください。",
+      "styles": [
+        {
+          "id": "90",
+          "name": "ノーマル"
+        },
+        {
+          "id": "91",
+          "name": "低血圧"
+        },
+        {
+          "id": "92",
+          "name": "覚醒"
+        },
+        {
+          "id": "93",
+          "name": "実況風"
+        }
+      ]
+    },
+    {
+      "name": "中部つるぎ",
+      "credit": "VOICEVOX:中部つるぎ",
+      "terms": "https://zunko.jp/con_ongen_kiyaku.html",
+      "note": "",
+      "styles": [
+        {
+          "id": "94",
+          "name": "ノーマル"
+        },
+        {
+          "id": "95",
+          "name": "怒り"
+        },
+        {
+          "id": "96",
+          "name": "ヒソヒソ"
+        },
+        {
+          "id": "97",
+          "name": "おどおど"
+        },
+        {
+          "id": "98",
+          "name": "絶望と敗北"
+        }
+      ]
+    },
+    {
+      "name": "離途",
+      "credit": "VOICEVOX:離途",
+      "terms": "https://litmus9.com/#/voicebank#rules",
+      "note": "",
+      "styles": [
+        {
+          "id": "99",
+          "name": "ノーマル"
+        },
+        {
+          "id": "101",
+          "name": "シリアス"
+        }
+      ]
+    },
+    {
+      "name": "黒沢冴白",
+      "credit": "VOICEVOX:黒沢冴白",
+      "terms": "https://www.virvoxproject.com/voicevoxの利用規約",
+      "note": "",
+      "styles": [
+        {
+          "id": "100",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "ユーレイちゃん",
+      "credit": "VOICEVOX:ユーレイちゃん(CV:神崎零)",
+      "terms": "https://u-stella.co.jp/voicevox-ure-chan-tucumo-terms-of-use/",
+      "note": "個人・非商用向け。法人・営利利用は事前確認してください。",
+      "styles": [
+        {
+          "id": "102",
+          "name": "ノーマル"
+        },
+        {
+          "id": "103",
+          "name": "甘々"
+        },
+        {
+          "id": "104",
+          "name": "哀しみ"
+        },
+        {
+          "id": "105",
+          "name": "ささやき"
+        },
+        {
+          "id": "106",
+          "name": "ツクモちゃん"
+        }
+      ],
+      "api_name": "ユーレイちゃん(CV:神崎零)"
+    },
+    {
+      "name": "東北ずん子",
+      "credit": "VOICEVOX:東北ずん子",
+      "terms": "https://zunko.jp/con_ongen_kiyaku.html",
+      "note": "",
+      "styles": [
+        {
+          "id": "107",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "東北きりたん",
+      "credit": "VOICEVOX:東北きりたん",
+      "terms": "https://zunko.jp/con_ongen_kiyaku.html",
+      "note": "",
+      "styles": [
+        {
+          "id": "108",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "東北イタコ",
+      "credit": "VOICEVOX:東北イタコ",
+      "terms": "https://zunko.jp/con_ongen_kiyaku.html",
+      "note": "",
+      "styles": [
+        {
+          "id": "109",
+          "name": "ノーマル"
+        }
+      ]
+    },
+    {
+      "name": "あんこもん",
+      "credit": "VOICEVOX:あんこもん",
+      "terms": "https://zunko.jp/con_ongen_kiyaku.html",
+      "note": "",
+      "styles": [
+        {
+          "id": "113",
+          "name": "ノーマル"
+        },
+        {
+          "id": "114",
+          "name": "つよつよ"
+        },
+        {
+          "id": "115",
+          "name": "よわよわ"
+        },
+        {
+          "id": "116",
+          "name": "けだるげ"
+        },
+        {
+          "id": "117",
+          "name": "ささやき"
+        }
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "name": "里石ユカ",
+      "reason": "生成AIを含むコンテンツでの利用制約があり、このBotへの組み込みは保留しています。",
+      "terms": "https://satoishiyuka.wixsite.com/satoishi/kiyaku"
+    },
+    {
+      "name": "夜語トバリ",
+      "reason": "現在の外部APIで代表スタイルを試すとHTTP 400になり、対応を確認できないため未追加です。",
+      "terms": "https://yogataritobari.studio.site/#rules"
+    },
+    {
+      "name": "暁記ミタマ",
+      "reason": "現在の外部APIで代表スタイルを試すとHTTP 400になり、対応を確認できないため未追加です。",
+      "terms": "https://yogataritobari.studio.site/#rules"
+    },
+    {
+      "name": "ブイブイ・コバコ",
+      "reason": "現在の外部APIで代表スタイルを試すとHTTP 400になり、対応を確認できないため未追加です。",
+      "terms": "https://vv-cobaco.com/terms"
+    }
+  ]
+}

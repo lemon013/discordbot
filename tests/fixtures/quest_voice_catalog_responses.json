@@ -1,0 +1,247 @@
+{
+  "checked_on": "2026-11-22",
+  "endpoint": "https://api.tts.quest/v3/voicevox/synthesis",
+  "type": "representative-style acceptance; audio URLs and request text omitted",
+  "responses": [
+    {
+      "character": "四国めたん",
+      "voice": "2",
+      "success": true,
+      "speakerName": "VOICEVOX:四国めたん（ノーマル）"
+    },
+    {
+      "character": "ずんだもん",
+      "voice": "3",
+      "success": true,
+      "speakerName": "VOICEVOX:ずんだもん（ノーマル）"
+    },
+    {
+      "character": "春日部つむぎ",
+      "voice": "8",
+      "success": true,
+      "speakerName": "VOICEVOX:春日部つむぎ（ノーマル）"
+    },
+    {
+      "character": "雨晴はう",
+      "voice": "10",
+      "success": true,
+      "speakerName": "VOICEVOX:雨晴はう（ノーマル）"
+    },
+    {
+      "character": "冥鳴ひまり",
+      "voice": "14",
+      "success": true,
+      "speakerName": "VOICEVOX:冥鳴ひまり（ノーマル）"
+    },
+    {
+      "character": "九州そら",
+      "voice": "16",
+      "success": true,
+      "speakerName": "VOICEVOX:九州そら（ノーマル）"
+    },
+    {
+      "character": "波音リツ",
+      "voice": "9",
+      "success": true,
+      "speakerName": "VOICEVOX:波音リツ（ノーマル）"
+    },
+    {
+      "character": "中国うさぎ",
+      "voice": "61",
+      "success": true,
+      "speakerName": "VOICEVOX:中国うさぎ（ノーマル）"
+    },
+    {
+      "character": "玄野武宏",
+      "voice": "11",
+      "success": true,
+      "speakerName": "VOICEVOX:玄野武宏（ノーマル）"
+    },
+    {
+      "character": "剣崎雌雄",
+      "voice": "21",
+      "success": true,
+      "speakerName": "VOICEVOX:剣崎雌雄（ノーマル）"
+    },
+    {
+      "character": "No.7",
+      "voice": "29",
+      "success": true,
+      "speakerName": "VOICEVOX:No.7（ノーマル）"
+    },
+    {
+      "character": "後鬼",
+      "voice": "27",
+      "success": true,
+      "speakerName": "VOICEVOX:後鬼（人間ver.）"
+    },
+    {
+      "character": "WhiteCUL",
+      "voice": "23",
+      "success": true,
+      "speakerName": "VOICEVOX:WhiteCUL（ノーマル）"
+    },
+    {
+      "character": "白上虎太郎",
+      "voice": "12",
+      "success": true,
+      "speakerName": "VOICEVOX:白上虎太郎（ふつう）"
+    },
+    {
+      "character": "ちび式じい",
+      "voice": "42",
+      "success": true,
+      "speakerName": "VOICEVOX:ちび式じい（ノーマル）"
+    },
+    {
+      "character": "櫻歌ミコ",
+      "voice": "43",
+      "success": true,
+      "speakerName": "VOICEVOX:櫻歌ミコ（ノーマル）"
+    },
+    {
+      "character": "ナースロボ＿タイプＴ",
+      "voice": "47",
+      "success": true,
+      "speakerName": "VOICEVOX:ナースロボ＿タイプＴ（ノーマル）"
+    },
+    {
+      "character": "†聖騎士 紅桜†",
+      "voice": "51",
+      "success": true,
+      "speakerName": "VOICEVOX:†聖騎士 紅桜†（ノーマル）"
+    },
+    {
+      "character": "雀松朱司",
+      "voice": "52",
+      "success": true,
+      "speakerName": "VOICEVOX:雀松朱司（ノーマル）"
+    },
+    {
+      "character": "麒ヶ島宗麟",
+      "voice": "53",
+      "success": true,
+      "speakerName": "VOICEVOX:麒ヶ島宗麟（ノーマル）"
+    },
+    {
+      "character": "春歌ナナ",
+      "voice": "54",
+      "success": true,
+      "speakerName": "VOICEVOX:春歌ナナ（ノーマル）"
+    },
+    {
+      "character": "猫使アル",
+      "voice": "55",
+      "success": true,
+      "speakerName": "VOICEVOX:猫使アル（ノーマル）"
+    },
+    {
+      "character": "猫使ビィ",
+      "voice": "58",
+      "success": true,
+      "speakerName": "VOICEVOX:猫使ビィ（ノーマル）"
+    },
+    {
+      "character": "栗田まろん",
+      "voice": "67",
+      "success": true,
+      "speakerName": "VOICEVOX:栗田まろん（ノーマル）"
+    },
+    {
+      "character": "あいえるたん",
+      "voice": "68",
+      "success": true,
+      "speakerName": "VOICEVOX:あいえるたん（ノーマル）"
+    },
+    {
+      "character": "満別花丸",
+      "voice": "69",
+      "success": true,
+      "speakerName": "VOICEVOX:満別花丸（ノーマル）"
+    },
+    {
+      "character": "琴詠ニア",
+      "voice": "74",
+      "success": true,
+      "speakerName": "VOICEVOX:琴詠ニア（ノーマル）"
+    },
+    {
+      "character": "青山龍星",
+      "voice": "13",
+      "success": true,
+      "speakerName": "VOICEVOX:青山龍星（ノーマル）"
+    },
+    {
+      "character": "もち子さん",
+      "voice": "20",
+      "success": true,
+      "speakerName": "VOICEVOX:もち子(cv 明日葉よもぎ)（ノーマル）"
+    },
+    {
+      "character": "小夜/SAYO",
+      "voice": "46",
+      "success": true,
+      "speakerName": "VOICEVOX:小夜/SAYO（ノーマル）"
+    },
+    {
+      "character": "Voidoll",
+      "voice": "89",
+      "success": true,
+      "speakerName": "VOICEVOX:Voidoll(CV:丹下桜)（ノーマル）"
+    },
+    {
+      "character": "ぞん子",
+      "voice": "90",
+      "success": true,
+      "speakerName": "VOICEVOX:ぞん子（ノーマル）"
+    },
+    {
+      "character": "中部つるぎ",
+      "voice": "94",
+      "success": true,
+      "speakerName": "VOICEVOX:中部つるぎ（ノーマル）"
+    },
+    {
+      "character": "離途",
+      "voice": "99",
+      "success": true,
+      "speakerName": "VOICEVOX:離途（ノーマル）"
+    },
+    {
+      "character": "黒沢冴白",
+      "voice": "100",
+      "success": true,
+      "speakerName": "VOICEVOX:黒沢冴白（ノーマル）"
+    },
+    {
+      "character": "ユーレイちゃん",
+      "voice": "102",
+      "success": true,
+      "speakerName": "VOICEVOX:ユーレイちゃん(CV:神崎零)（ノーマル）"
+    },
+    {
+      "character": "東北ずん子",
+      "voice": "107",
+      "success": true,
+      "speakerName": "VOICEVOX:東北ずん子（ノーマル）"
+    },
+    {
+      "character": "東北きりたん",
+      "voice": "108",
+      "success": true,
+      "speakerName": "VOICEVOX:東北きりたん（ノーマル）"
+    },
+    {
+      "character": "東北イタコ",
+      "voice": "109",
+      "success": true,
+      "speakerName": "VOICEVOX:東北イタコ（ノーマル）"
+    },
+    {
+      "character": "あんこもん",
+      "voice": "113",
+      "success": true,
+      "speakerName": "VOICEVOX:あんこもん（ノーマル）"
+    }
+  ]
+}

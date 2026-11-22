@@ -186,6 +186,39 @@ class ReadingTests(unittest.IsolatedAsyncioTestCase):
         await command.callback(self.interaction, 10, 20, 30)
         self.assertEqual(service.config(1)['tts_volume'], 20)
         self.assertEqual(self.store.get('guild', 1, {})['board_volume'], 30)
+
+    async def test_character_selection_and_style_autocomplete_handle_more_than_25_voices(self):
+        from voice_catalog import VOICES
+        self.providers.voices.return_value = dict(VOICES)
+        with patch('voice_reading.VoiceStore', return_value=self.store), patch('voice_reading.Providers', return_value=self.providers):
+            service = register_voice(self.bot, self.sound)
+        group = self.bot.tree.get_command('voice')
+        change = group.get_command('change')
+        await change.callback(self.interaction, character='青山龍星', speed=1.5)
+        self.assertEqual(self.store.get('user', 2, {})['voice'], '13')
+        self.assertEqual(self.store.get('user', 2, {})['speed'], 1.5)
+        self.assertIn('事前申請', self.interaction.edit_original_response.call_args.kwargs['content'])
+        callback = change._params['voice'].autocomplete
+        self.interaction.namespace = NS(character='青山龍星')
+        choices = await callback(self.interaction, '')
+        self.assertGreater(len(choices), 1)
+        self.assertLessEqual(len(choices), 25)
+        self.assertTrue(all('青山龍星' in item.name for item in choices))
+        callback = change._params['character'].autocomplete
+        choices = await callback(self.interaction, '東北')
+        self.assertEqual({item.name for item in choices}, {'東北ずん子', '東北きりたん', '東北イタコ'})
+        self.assertIsNotNone(group.get_command('credits'))
+        self.assertIsNotNone(group.get_command('characters'))
+
+    async def test_character_selection_does_not_accept_a_style_from_another_character(self):
+        from voice_catalog import VOICES
+        self.providers.voices.return_value = dict(VOICES)
+        with patch('voice_reading.VoiceStore', return_value=self.store), patch('voice_reading.Providers', return_value=self.providers):
+            register_voice(self.bot, self.sound)
+        change = self.bot.tree.get_command('voice').get_command('change')
+        await change.callback(self.interaction, character='青山龍星', voice='3')
+        self.assertEqual(self.store.get('user', 2, {}), {})
+        self.assertIn('選んでください', self.interaction.edit_original_response.call_args.kwargs['content'])
     async def test_real_ffmpeg_pcm_is_mixed_and_temporary_audio_is_released(self):
         voice = NS(channel=self.channel, is_connected=lambda: True, is_playing=lambda: False,
                    play=Mock())

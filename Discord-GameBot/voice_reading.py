@@ -1,6 +1,7 @@
 """Opt-in VC text reading, provider synthesis, and persistent voice preferences."""
 import asyncio
 import base64
+import io
 from contextlib import closing
 import json
 import logging
@@ -20,6 +21,7 @@ from sound import SoundError, MAX_BYTES
 from storage import database_path
 from voice_mixer import VoiceHub
 from quest_voice import QuestVoice, VOICES, REVIEWED_NAMES
+from voice_catalog import CHARACTERS, normalized, voice_info, credits_text, CREDITS_URL
 
 log = logging.getLogger(__name__)
 CREDIT = 'クレジットはBotのプロフィール欄を参照してください。'
@@ -346,20 +348,31 @@ def register_voice(bot, sound):
 
     @group.command(name='change', description='自分の読み上げ音声と速度を変更します')
     @app_commands.choices(provider=[app_commands.Choice(name='VOICEVOX', value='voicevox')])
+    @app_commands.describe(character='キャラクター名（名前を入力すると候補が出ます）', voice='スタイル（characterを先に選ぶと絞り込めます）')
     async def change(interaction: discord.Interaction, provider: str | None = None, voice: str | None = None,
-                     speed: app_commands.Range[float, 0.5, 2.0] | None = None):
+                     speed: app_commands.Range[float, 0.5, 2.0] | None = None, character: str | None = None):
         async def op():
             preference = service.preference(interaction.user.id)
             chosen = provider or preference['provider']
             if chosen != 'voicevox':
                 raise SoundError('現在はVOICEVOX専用です。Google音声は使用しません。')
             catalog = await service.providers.voices(chosen)
+            if character:
+                matches = [name for name in CHARACTERS if normalized(name) == normalized(character)]
+                if not matches:
+                    raise SoundError('character欄の候補からキャラクターを選んでください。')
+                matched_name = matches[0]
+                catalog = {key: label for key, label in catalog.items() if normalized(label.split('（')[0]) == normalized(matched_name)}
+                if not catalog:
+                    raise SoundError('この接続先では選んだキャラクターを使用できません。')
             selected = voice or (preference['voice'] if chosen == preference['provider'] and preference['voice'] in catalog else next(iter(catalog)))
             if selected not in catalog:
                 raise SoundError('音声欄の候補から声を選んでください。')
             preference.update(provider=chosen, voice=selected, speed=speed if speed is not None else preference['speed'])
             await asyncio.to_thread(service.store.put, 'user', interaction.user.id, preference)
-            return f'音声：{chosen} / {catalog[selected]}、速度：{preference["speed"]}倍\n{CREDIT}'
+            info = voice_info(selected)
+            detail = ('\n' + info['credit'] + ('\n' + info['note'] if info['note'] else '')) if info else ''
+            return f'音声：{chosen} / {catalog[selected]}、速度：{preference["speed"]}倍\n{CREDIT}' + detail
         await run(interaction, op)
 
     @change.autocomplete('voice')
@@ -367,10 +380,30 @@ def register_voice(bot, sound):
         try:
             provider = 'voicevox'
             catalog = await asyncio.wait_for(service.providers.voices(provider), 2)
+            character = getattr(interaction.namespace, 'character', None)
+            if character:
+                catalog = {key: label for key, label in catalog.items() if normalized(label.split('（')[0]) == normalized(character)}
             return [app_commands.Choice(name=label[:100], value=key) for key, label in catalog.items()
-                    if current.casefold() in (key + label).casefold()][:25]
+                    if normalized(current) in normalized(key + label)][:25]
         except Exception:
             return []
+
+    @change.autocomplete('character')
+    async def characters(interaction: discord.Interaction, current: str):
+        return [app_commands.Choice(name=name, value=name) for name in CHARACTERS
+                if normalized(current) in normalized(name)][:25]
+
+    @group.command(name='characters', description='選べる読み上げキャラクターを一覧表示します')
+    async def character_list(interaction: discord.Interaction):
+        text = '\n'.join(f'{entry["name"]}（{len(entry["styles"])}スタイル）' for entry in CHARACTERS.values())
+        await interaction.response.send_message(short_display(f'キャラクター候補：{len(CHARACTERS)}人\n{text}\n\n/voice change のcharacter欄に名前を入力して選べます。APIの提供状況により使えない候補があります。'), ephemeral=True,
+                                                allowed_mentions=discord.AllowedMentions.none())
+
+    @group.command(name='credits', description='音声クレジットと各キャラクターの利用規約を表示します')
+    async def credit_list(interaction: discord.Interaction):
+        await interaction.response.send_message(f'音声クレジットと利用規約：{CREDITS_URL}\nプロフィールからもこの一覧へ案内できます。',
+            file=discord.File(io.BytesIO(credits_text().encode('utf-8')), filename='voice-credits.txt'),
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @group.command(name='list', description='参加中のVCメンバーの読み上げ設定を表示します')
     async def list_settings(interaction: discord.Interaction):

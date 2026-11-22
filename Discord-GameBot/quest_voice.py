@@ -9,22 +9,8 @@ import time
 import aiohttp
 
 from sound import MAX_BYTES, SoundError
+from voice_catalog import VOICES, API_LABELS, REVIEWED_NAMES, speaker_matches
 
-# IDs from VOICEVOX's published talk-model metadata. Only reviewed libraries.
-VOICES = {
-    '3': 'ずんだもん（ノーマル）', '1': 'ずんだもん（あまあま）',
-    '7': 'ずんだもん（ツンツン）', '5': 'ずんだもん（セクシー）',
-    '22': 'ずんだもん（ささやき）', '38': 'ずんだもん（ヒソヒソ）',
-    '2': '四国めたん（ノーマル）', '0': '四国めたん（あまあま）',
-    '6': '四国めたん（ツンツン）', '4': '四国めたん（セクシー）',
-    '36': '四国めたん（ささやき）', '37': '四国めたん（ヒソヒソ）',
-    '16': '九州そら（ノーマル）', '15': '九州そら（あまあま）',
-    '18': '九州そら（ツンツン）', '17': '九州そら（セクシー）',
-    '19': '九州そら（ささやき）',
-    '61': '中国うさぎ（ノーマル）', '62': '中国うさぎ（おどろき）',
-    '63': '中国うさぎ（こわがり）', '64': '中国うさぎ（へろへろ）',
-}
-REVIEWED_NAMES = {'ずんだもん', '四国めたん', '九州そら', '中国うさぎ'}
 API = 'https://api.tts.quest/v3/voicevox/synthesis'
 
 
@@ -107,7 +93,7 @@ class QuestVoice:
                     self.throttle(result['retryAfter'])
                 if result.get('success') is not True:
                     raise SoundError('外部音声APIで合成できませんでした。利用制限や対応音声を確認してください。')
-                if VOICES[voice] not in str(result.get('speakerName', '')):
+                if not speaker_matches(API_LABELS[voice], result.get('speakerName', '')):
                     raise SoundError('指定した声の音声を外部APIから取得できませんでした。')
                 status_url, wav_url = audio_urls(result)
                 # Poll at most once every 3 seconds; no unbounded retries.
