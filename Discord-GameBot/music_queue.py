@@ -336,7 +336,7 @@ class Music:
             embed = discord.Embed(title='🔎 YouTube検索結果', description=safe_title(query), colour=0x3498DB)
             for index, entry in enumerate(entries, 1):
                 embed.add_field(name=f'候補 {index}',
-                    value=f'[{safe_title(entry["title"])}]({entry["url"]})', inline=False)
+                    value=f'{safe_title(entry["title"])}\n{entry["url"]}', inline=False)
             if not entries:
                 embed.description = '該当する動画が見つかりませんでした。別のキーワードで検索してください。'
             embed.set_footer(text='再生するにはVCのチャットで /play url:動画のリンク を実行してください。')
