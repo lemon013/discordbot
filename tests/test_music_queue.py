@@ -118,6 +118,113 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sound.play.await_count, 1)
         self.assertIs(session.source, source)
 
+    async def finish_track(self, error=None):
+        session = self.music.sessions[1]
+        self.active, self.paused = False, False
+        session.source.playback_error = error
+        await self.sound.finished(self.guild, session.source)
+        await self.settle()
+
+    async def test_track_loop_repeats_current_and_skip_advances(self):
+        await self.music.enqueue(self.call(), URL_A)
+        await self.settle()
+        await self.music.enqueue(self.call(), URL_B)
+        await self.music.control(self.call(), 'loop_track')
+        session = self.music.sessions[1]
+        await self.finish_track()
+        self.assertEqual(session.current.url, URL_A)
+        self.assertEqual([t.url for t in session.queue], [URL_B])
+        await self.music.control(self.call(), 'skip')
+        await self.settle()
+        self.assertEqual(session.current.url, URL_B)
+        self.assertFalse(session.queue)
+        await self.finish_track()
+        self.assertEqual(session.current.url, URL_B)
+
+    async def test_queue_loop_cycles_all_tracks_and_keeps_skipped_track_for_next_round(self):
+        await self.music.enqueue(self.call(), URL_A)
+        await self.settle()
+        await self.music.enqueue(self.call(), URL_B)
+        await self.music.enqueue(self.call(), URL_C)
+        await self.music.control(self.call(), 'loop_queue')
+        session = self.music.sessions[1]
+        for expected in (URL_B, URL_C, URL_A):
+            await self.finish_track()
+            self.assertEqual(session.current.url, expected)
+            self.assertEqual(len(session.queue), 2)
+        await self.music.control(self.call(), 'skip')
+        await self.settle()
+        self.assertEqual(session.current.url, URL_B)
+        self.assertEqual([t.url for t in session.queue], [URL_C, URL_A])
+
+    async def test_loop_modes_are_exclusive_toggle_off_and_require_membership(self):
+        await self.music.enqueue(self.call(), URL_A)
+        await self.settle()
+        session = self.music.sessions[1]
+        await self.music.control(self.call(joined=False), 'loop_queue')
+        self.assertEqual(session.loop_mode, 'off')
+        await self.music.control(self.call(), 'loop_track')
+        self.assertEqual(session.loop_mode, 'track')
+        await self.music.control(self.call(), 'loop_queue')
+        self.assertEqual(session.loop_mode, 'queue')
+        view = MusicView(self.music, session.loop_mode)
+        self.assertEqual(view.loop_queue.style, discord.ButtonStyle.success)
+        self.assertEqual(view.loop_track.style, discord.ButtonStyle.secondary)
+        view.stop()
+        await self.music.control(self.call(), 'loop_queue')
+        self.assertEqual(session.loop_mode, 'off')
+        await self.finish_track()
+        self.assertIsNone(session.current)
+        self.assertFalse(session.queue)
+
+    async def test_failed_playback_is_not_repeated_in_either_loop_mode(self):
+        for action in ('loop_track', 'loop_queue'):
+            await self.music.enqueue(self.call(), URL_A)
+            await self.settle()
+            await self.music.control(self.call(), action)
+            await self.finish_track(error='RuntimeError')
+            session = self.music.sessions[1]
+            self.assertIsNone(session.current)
+            self.assertFalse(session.queue)
+            self.music.clear(1)
+        self.assertEqual(self.sound.play.await_count, 2)
+
+    async def test_full_stop_disables_loop_and_does_not_restart(self):
+        for action in ('stop', 'leave'):
+            self.connected = True
+            await self.music.enqueue(self.call(), URL_A)
+            await self.settle()
+            await self.music.control(self.call(), 'loop_queue')
+            count = self.sound.play.await_count
+            await self.sound.invoke(self.call(), action)
+            await self.settle()
+            session = self.music.sessions[1]
+            self.assertEqual(session.loop_mode, 'off')
+            self.assertFalse(session.queue)
+            self.assertIsNone(session.current)
+            self.assertEqual(self.sound.play.await_count, count)
+
+    async def test_loop_can_be_set_during_preparation_and_skip_preserves_queue_cycle(self):
+        entered = asyncio.Event()
+        first = True
+        async def play(context, channel, audio):
+            nonlocal first
+            if first:
+                first = False
+                entered.set()
+                await asyncio.Event().wait()
+            return await self.start_track(context, channel, audio)
+        self.sound.play.side_effect = play
+        await self.music.enqueue(self.call(), URL_A)
+        await entered.wait()
+        await self.music.enqueue(self.call(), URL_B)
+        await self.music.control(self.call(), 'loop_queue')
+        await self.music.control(self.call(), 'skip')
+        await self.settle()
+        session = self.music.sessions[1]
+        self.assertEqual(session.current.url, URL_B)
+        self.assertEqual([t.url for t in session.queue], [URL_A])
+
     async def test_skip_does_not_double_advance_before_cleanup(self):
         await self.music.enqueue(self.call(), URL_A)
         await self.settle()
@@ -243,7 +350,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
     async def test_dashboard_buttons_persist_and_embed_escapes_titles(self):
         view = MusicView(self.music)
         self.assertTrue(view.is_persistent())
-        self.assertEqual([b.label for b in view.children], ['次へ', '再生', 'ストップ'])
+        self.assertEqual([b.label for b in view.children], ['次へ', '再生', 'ストップ', '曲ループ', '全曲ループ'])
         session = self.music.session_for(self.call())
         session.queue.extend(Track(URL_A, '@everyone ' + '😀' * 90) for _ in range(50))
         embed = self.music.embed(session)

@@ -45,6 +45,7 @@ class Session:
     status: str = '待機中'
     error: str = ''
     skipping: bool = False
+    loop_mode: str = 'off'
 
 
 class PlaybackContext:
@@ -61,9 +62,11 @@ class PlaybackContext:
 
 
 class MusicView(discord.ui.View):
-    def __init__(self, service):
+    def __init__(self, service, loop_mode='off'):
         super().__init__(timeout=None)
         self.service = service
+        self.loop_track.style = discord.ButtonStyle.success if loop_mode == 'track' else discord.ButtonStyle.secondary
+        self.loop_queue.style = discord.ButtonStyle.success if loop_mode == 'queue' else discord.ButtonStyle.secondary
 
     @discord.ui.button(label='次へ', emoji='⏭️', style=discord.ButtonStyle.primary, custom_id='music:v1:skip')
     async def skip(self, interaction, button):
@@ -76,6 +79,14 @@ class MusicView(discord.ui.View):
     @discord.ui.button(label='ストップ', emoji='⏸️', style=discord.ButtonStyle.secondary, custom_id='music:v1:pause')
     async def pause(self, interaction, button):
         await self.service.control(interaction, 'pause')
+
+    @discord.ui.button(label='曲ループ', emoji='🔂', style=discord.ButtonStyle.secondary, custom_id='music:v1:loop_track')
+    async def loop_track(self, interaction, button):
+        await self.service.control(interaction, 'loop_track')
+
+    @discord.ui.button(label='全曲ループ', emoji='🔁', style=discord.ButtonStyle.secondary, custom_id='music:v1:loop_queue')
+    async def loop_queue(self, interaction, button):
+        await self.service.control(interaction, 'loop_queue')
 
 
 class Music:
@@ -129,6 +140,8 @@ class Music:
             lines.pop()
             upcoming = '\n'.join(lines) + '\n…'
         embed.add_field(name=f'次に流す曲（{len(session.queue)}/{MAX_QUEUE}）', value=upcoming, inline=False)
+        embed.add_field(name='ループ', value={'off': 'OFF', 'track': '🔂 現在の曲',
+                                             'queue': '🔁 プレイリスト全体'}[session.loop_mode], inline=False)
         if session.error:
             embed.add_field(name='直近の案内', value=safe_title(session.error), inline=False)
         embed.set_footer(text='ストップ＝一時停止／再生＝続きから再開。キュー終了後60秒で自動退出。')
@@ -146,7 +159,7 @@ class Music:
                 session.dirty = False
                 if self.sessions.get(session.guild.id) is not session:
                     return
-                view = MusicView(self)
+                view = MusicView(self, session.loop_mode)
                 try:
                     if session.dashboard is not None:
                         try:
@@ -220,6 +233,13 @@ class Music:
         if session is None:
             return
         if session.source is source:
+            # Only successful YouTube tracks repeat. Failed audio must not loop forever.
+            track = session.current
+            if track is not None and not source.playback_error:
+                if session.loop_mode == 'queue':
+                    session.queue.append(track)
+                elif session.loop_mode == 'track' and not session.skipping:
+                    session.queue.appendleft(track)
             session.current, session.source, session.skipping = None, None, False
         elif session.source is not None:
             return
@@ -233,6 +253,7 @@ class Music:
             return
         session.generation += 1
         session.queue.clear()
+        session.loop_mode = 'off'
         session.current, session.source, session.skipping = None, None, False
         for task in list(session.fetches):
             task.cancel()
@@ -315,7 +336,21 @@ class Music:
             if session.control_lock.locked():
                 raise SoundError('切り替え中です。少しお待ちください。')
             async with session.control_lock:
+                if action in ('loop_track', 'loop_queue'):
+                    voice = session.guild.voice_client
+                    if voice and voice.is_connected() and voice.channel.id != session.channel.id:
+                        raise SoundError('Botが参加しているVCで操作してください。')
+                    mode = 'track' if action == 'loop_track' else 'queue'
+                    session.loop_mode = 'off' if session.loop_mode == mode else mode
+                    answer = {'off': 'ループ再生をOFFにしました。',
+                              'track': '🔂 曲ループをONにしました。同じ曲を繰り返します。',
+                              'queue': '🔁 全曲ループをONにしました。現在の曲とキューを順番に繰り返します。'}[session.loop_mode]
+                    self.refresh(session)
+                    await self.sound.status(interaction, answer)
+                    return
                 if action == 'skip' and session.task and not session.task.done():
+                    if session.loop_mode == 'queue' and session.current is not None:
+                        session.queue.append(session.current)
                     session.current, session.source = None, None
                     task = session.task
                     task.cancel()
@@ -381,7 +416,7 @@ def register_music(bot, sound):
         except SoundError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
-        await interaction.response.send_message(embed=service.embed(session), view=MusicView(service),
+        await interaction.response.send_message(embed=service.embed(session), view=MusicView(service, session.loop_mode),
                                                 allowed_mentions=discord.AllowedMentions.none())
         try:
             session.dashboard = await interaction.original_response()
