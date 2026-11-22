@@ -27,6 +27,7 @@ class CatalogTests(unittest.TestCase):
         self.assertIn('事前', CHARACTERS['青山龍星']['note'])
         self.assertIn('非商用', CHARACTERS['No.7']['note'])
         text = credits_text()
+        self.assertNotIn('github.com', text.lower())
         self.assertIn('利用実績の一覧ではありません', text)
         self.assertTrue(all(entry['credit'] in text and entry['terms'] in text for entry in CHARACTERS.values()))
 

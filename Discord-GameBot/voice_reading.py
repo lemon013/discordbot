@@ -21,7 +21,7 @@ from sound import SoundError, MAX_BYTES
 from storage import database_path
 from voice_mixer import VoiceHub
 from quest_voice import QuestVoice, VOICES, REVIEWED_NAMES
-from voice_catalog import CHARACTERS, normalized, voice_info, credits_text, CREDITS_URL
+from voice_catalog import CHARACTERS, normalized, voice_info, credits_text
 
 log = logging.getLogger(__name__)
 CREDIT = 'クレジットはBotのプロフィール欄を参照してください。'
@@ -401,7 +401,7 @@ def register_voice(bot, sound):
 
     @group.command(name='credits', description='音声クレジットと各キャラクターの利用規約を表示します')
     async def credit_list(interaction: discord.Interaction):
-        await interaction.response.send_message(f'音声クレジットと利用規約：{CREDITS_URL}\nプロフィールからもこの一覧へ案内できます。',
+        await interaction.response.send_message('音声クレジット・各キャラクターの利用規約は、添付の一覧をご確認ください。\nBotのプロフィールには「読み上げ：VOICEVOX／クレジット・利用規約は /voice credits を参照」と掲載できます。',
             file=discord.File(io.BytesIO(credits_text().encode('utf-8')), filename='voice-credits.txt'),
             ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 

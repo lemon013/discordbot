@@ -8,8 +8,7 @@ Botのプロフィールには、例えば次を掲載できます。
 
 ```text
 読み上げ：VOICEVOX
-対応音声・クレジット表記例・利用規約：
-https://github.com/lemon013/discordbot/blob/main/Discord-GameBot/VOICE_CREDITS.md
+対応音声・クレジット表記例・利用規約：/voice credits を参照
 ```
 
 声を選択した際はBot内にも該当音声のクレジットを表示します。`/voice credits` から表記例をテキストファイルで取得できます。外部APIの対応状況により利用できない候補があります。

@@ -11,7 +11,6 @@ API_LABELS = {style['id']: f'{entry.get("api_name", entry["name"])}（{style["na
               for entry in DATA['characters'] for style in entry['styles']}
 VOICE_INFO = {style['id']: entry for entry in DATA['characters'] for style in entry['styles']}
 REVIEWED_NAMES = set(CHARACTERS)
-CREDITS_URL = 'https://github.com/lemon013/discordbot/blob/main/Discord-GameBot/VOICE_CREDITS.md'
 
 
 def normalized(text):
@@ -27,7 +26,7 @@ def voice_info(voice):
 
 
 def credits_text():
-    lines = ['VOICEVOX音声クレジット・利用規約一覧', CREDITS_URL,
+    lines = ['VOICEVOX音声クレジット・利用規約一覧',
              '以下は対応候補ごとの表記例です。利用実績の一覧ではありません。',
              '個人の非商用チャット読み上げを前提とした候補です。各音声の規約を確認してください。',
              '画像・キャラクターのなりきり・企業利用・有料サービス化は別の条件が適用されることがあります。', '']
