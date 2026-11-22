@@ -282,7 +282,7 @@ class Sound:
         try:
             path = Path(directory.name) / ('audio' + suffix)
             await self.status(interaction, '📥 添付ファイルを取得しています。')
-            await asyncio.wait_for(attachment.save(path), timeout=30)
+            await asyncio.wait_for(attachment.save(path), timeout=getattr(attachment, 'download_timeout', 30))
             if path.stat().st_size <= 0 or path.stat().st_size > MAX_BYTES:
                 raise SoundError('音声ファイルは25MB以内で添付してください。')
             await self.status(interaction, '🎵 ファイルの音声を確認しています。MP4は音声のみ使用します。')

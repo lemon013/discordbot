@@ -647,6 +647,8 @@ from othello import register_othello
 register_othello(bot)
 from sound import register_sound
 sound_service = register_sound(bot)
+from youtube_play import register_youtube_play
+register_youtube_play(bot, sound_service)
 from soundboard import register_soundboard
 register_soundboard(bot, sound_service)
 from ping import register_ping
