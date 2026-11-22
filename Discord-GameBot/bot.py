@@ -124,13 +124,14 @@ STATUS_MESSAGES = (
     '✨made by ちょこもち！',
     '🤔メンションして聞いてね！',
     '💬話してレベルアップ！',
-    '🤔メンションして聞いてね！',
+    '📢週1以上の頻度でアプデ！',
     '🏆目指せ全知全能bot！',
-    '🤔メンションして聞いてね！',
+    '👳アキネーター実装！',
     '💎ジュエルを稼いで特典GET！',
-    '🤔メンションして聞いてね！',
     '✅powered by MWS！',
-    '🤔メンションして聞いてね！',
+    '🎼音声/動画ファイルを再生可！',
+    '🥇ボドゲで目指せ優勝！',
+    '🎁/giftで贈り物を送れる！',
 )
 bot = commands.Bot(command_prefix='!', intents=intents,
                    activity=discord.CustomActivity(name=STATUS_MESSAGES[0]))
