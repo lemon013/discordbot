@@ -135,13 +135,19 @@ STATUS_MESSAGES = (
 )
 bot = commands.Bot(command_prefix='!', intents=intents,
                    activity=discord.CustomActivity(name=STATUS_MESSAGES[0]))
+from presence_rotation import PresenceRotation
+status_rotation = PresenceRotation(bot, STATUS_MESSAGES)
 
 
 @tasks.loop(seconds=5)
 async def rotate_status():
-    await bot.wait_until_ready()
-    text = STATUS_MESSAGES[rotate_status.current_loop % len(STATUS_MESSAGES)]
-    await bot.change_presence(activity=discord.CustomActivity(name=text))
+    await status_rotation.update()
+
+
+@bot.listen('on_resumed')
+async def resume_status_rotation():
+    if not rotate_status.is_running():
+        rotate_status.start()
 
 def safe_name(user):
     return discord.utils.escape_markdown(getattr(user, 'display_name', user.name))
