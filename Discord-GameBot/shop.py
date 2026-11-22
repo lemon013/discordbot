@@ -27,7 +27,7 @@ ATTACHMENT_NAME = 'shop-entitlements.json'
 PAGE_SIZE = 10
 CATEGORIES = {
     'xp': ('経験値アップ', '✨', 'Discordの経験値を増やします。'),
-    'ticket': ('スペシャルチケット', '🎟️', '500ジュエルで抽選1口分のチケット1枚を購入できます。'),
+    'ticket': ('スペシャルチケット', '🎟️', '1枚50ジュエル。1～50枚をまとめ買いできます。'),
     'record': ('レコード', '🎵', 'Minecraft参加時に効果音を流します。'),
     'welcome': ('ようこそメッセージ', '💬', 'Minecraft参加時に歓迎文を流します。'),
 }
@@ -81,10 +81,12 @@ class ShopStore:
             return {str(row['user_id']): dict(record=row['record'], welcome=row['welcome'])
                     for row in db.execute('SELECT * FROM shop_active WHERE guild_id=?', (guild_id,))}
 
-    def buy(self, guild_id, user_id, event_id, item_id):
+    def buy(self, guild_id, user_id, event_id, item_id, quantity=1):
         item = ITEMS.get(item_id)
         if item is None:
             raise ShopError('商品が見つかりません。/shop を開き直してください。')
+        if type(quantity) is not int or not 1 <= quantity <= 50 or (item['kind'] != 'ticket' and quantity != 1):
+            raise ShopError('チケットの購入枚数は1～50枚の整数で指定してください。')
         with closing(self.casino.connect()) as db, db:
             alias = 'main'
             if item['kind'] == 'xp' and self.casino.path.resolve() != self.levels.path.resolve():
@@ -97,20 +99,21 @@ class ShopStore:
             db.execute('BEGIN IMMEDIATE')
             replay = self.casino.replay(db, event_id, guild_id, user_id, 'shop')
             if replay is not None:
-                if replay['item_id'] != item_id:
+                if replay['item_id'] != item_id or replay.get('quantity', 1) != quantity:
                     raise ShopError('処理済みの商品と一致しません。')
                 return replay
             wallet = self.casino.wallet(db, guild_id, user_id)
             owned = db.execute('SELECT 1 FROM shop_owned WHERE guild_id=? AND user_id=? AND item_id=?',
                                (guild_id, user_id, item_id)).fetchone()
-            price = 0 if owned else item['price']
+            price = 0 if owned else item['price'] * quantity
             if wallet['balance'] < price:
                 raise ShopError(f"ジュエルが足りません。必要：💎 {price:,} / 残高：💎 {wallet['balance']:,}")
             result = dict(item_id=item_id, price=price, balance=wallet['balance'] - price, equipped=bool(owned))
+            result['quantity'] = quantity
             if item['kind'] == 'ticket':
                 from ticket_store import add_in
-                add_in(db, guild_id, user_id, 'ticket:shop:' + event_id, 1, 'purchase')
-                result['tickets'] = 1
+                add_in(db, guild_id, user_id, 'ticket:shop:' + event_id, quantity, 'purchase')
+                result['tickets'] = quantity
             elif item['kind'] == 'xp':
                 cfg_row = db.execute(f'SELECT * FROM {alias}.level_config WHERE guild_id=?', (guild_id,)).fetchone()
                 cfg = {**DEFAULTS, **(dict(cfg_row) if cfg_row else {})}
@@ -198,17 +201,17 @@ class ShopService:
         embed.set_footer(text='音・歓迎文は各1つ装備。Minecraft反映にはPCブリッジとPC Botでの/linkが必要です。')
         return embed
 
-    async def purchase(self, interaction, item_id, *, page=0):
+    async def purchase(self, interaction, item_id, *, page=0, quantity=1):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            result = await asyncio.to_thread(self.store.buy, interaction.guild_id, interaction.user.id, str(interaction.id), item_id)
+            result = await asyncio.to_thread(self.store.buy, interaction.guild_id, interaction.user.id, str(interaction.id), item_id, quantity)
         except (ShopError, CasinoError) as error:
             await interaction.edit_original_response(content=str(error), embed=None, view=None)
             return
         item = ITEMS[item_id]
         message = f"✅ {item['name']}を{'装備' if result['equipped'] else '購入'}しました！\n支払い：💎 {result['price']:,} / 残高：💎 {result['balance']:,}"
         if item['kind'] == 'ticket':
-            message += '\n🎟️ スペシャルチケット +1枚（/ticket balance で確認）'
+            message += f'\n🎟️ スペシャルチケット +{result["tickets"]}枚（/ticket balance で確認）'
         profile = await asyncio.to_thread(self.store.profile, interaction.guild_id, interaction.user.id)
         await interaction.edit_original_response(content=message, embed=self.board(profile, item['kind'], page), view=ShopView(self, interaction.user.id, profile, category=item['kind'], page=page),
                                                  allowed_mentions=discord.AllowedMentions.none())
@@ -294,8 +297,32 @@ class ShopView(OwnedView):
         self.add_item(home)
 
 
+class TicketQuantityModal(discord.ui.Modal, title='チケットの購入枚数'):
+    quantity_input = discord.ui.TextInput(label='購入枚数（1～50枚）', min_length=1, max_length=2)
+
+    def __init__(self, service, owner, item_id, page, quantity):
+        super().__init__(timeout=180)
+        self.service, self.owner, self.item_id, self.page = service, owner, item_id, page
+        self.quantity_input.default = str(quantity)
+
+    async def on_submit(self, interaction):
+        if interaction.user.id != self.owner or interaction.guild is None:
+            await interaction.response.send_message('この購入画面は開いた本人だけが操作できます。', ephemeral=True)
+            return
+        text = self.quantity_input.value.strip()
+        if not text.isascii() or not text.isdecimal() or not 1 <= int(text) <= 50:
+            await interaction.response.send_message('購入枚数は1～50の整数で入力してください。', ephemeral=True)
+            return
+        quantity = int(text)
+        item = ITEMS[self.item_id]
+        embed = discord.Embed(title='🎟️ チケット購入の確認',
+            description=f'**{quantity}枚 × {item["price"]:,}ジュエル＝合計 {quantity * item["price"]:,}ジュエル**\n「購入する」で確定します。', colour=discord.Colour.blue())
+        await interaction.response.edit_message(content=None, embed=embed,
+            view=ConfirmView(self.service, self.owner, self.item_id, False, page=self.page, quantity=quantity))
+
+
 class ConfirmView(OwnedView):
-    def __init__(self, service, owner, item_id, owned, *, page=0):
+    def __init__(self, service, owner, item_id, owned, *, page=0, quantity=1):
         super().__init__(service, owner)
         self.used = False
         self.category, self.page = ITEMS[item_id]['kind'], page
@@ -305,9 +332,21 @@ class ConfirmView(OwnedView):
                 await interaction.response.send_message('この購入操作は処理済みです。商品一覧から選び直してください。', ephemeral=True)
                 return
             self.used = True
-            await service.purchase(interaction, item_id, page=self.page)
+            if self.category == 'ticket':
+                await service.purchase(interaction, item_id, page=self.page, quantity=quantity)
+            else:
+                await service.purchase(interaction, item_id, page=self.page)
         button.callback = purchase
         self.add_item(button)
+        if self.category == 'ticket':
+            change_quantity = discord.ui.Button(label=f'枚数を変更（現在{quantity}枚）', style=discord.ButtonStyle.primary)
+            async def choose_quantity(interaction):
+                if self.used:
+                    await interaction.response.send_message('この購入画面は処理済みです。商品一覧から選び直してください。', ephemeral=True)
+                    return
+                await interaction.response.send_modal(TicketQuantityModal(service, owner, item_id, self.page, quantity))
+            change_quantity.callback = choose_quantity
+            self.add_item(change_quantity)
 
     @discord.ui.button(label='商品一覧に戻る', style=discord.ButtonStyle.secondary)
     async def back(self, interaction, button):

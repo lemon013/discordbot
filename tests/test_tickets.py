@@ -37,7 +37,7 @@ class TicketStoreTests(unittest.TestCase):
         self.casino.edit(1, 10, 'seed', 'set', 1500, 99)
         for event in ['one', 'one', 'two']:
             self.shop.buy(1, 10, event, 'special_ticket')
-        self.assertEqual(self.casino.balance(1, 10), 500)
+        self.assertEqual(self.casino.balance(1, 10), 1400)
         self.assertEqual(self.count(), 2)
         self.assertEqual(TicketStore(CasinoStore(self.casino.path)).ranking(1)[0]['count'], 2)
         self.assertNotIn('special_ticket', self.shop.profile(1, 10)['owned'])
@@ -47,6 +47,23 @@ class TicketStoreTests(unittest.TestCase):
         with self.assertRaises(ShopError):
             self.shop.buy(1, 10, 'poor', 'special_ticket')
         self.assertEqual(self.count(), 0)
+
+    def test_bulk_purchase_bounds_total_cost_and_replay_quantity_must_match(self):
+        self.casino.edit(1, 10, 'seed-bulk', 'set', 2500, 99)
+        result = self.shop.buy(1, 10, 'bulk', 'special_ticket', 50)
+        self.assertEqual((result['price'], result['tickets'], result['balance']), (2500, 50, 0))
+        self.assertEqual(self.shop.buy(1, 10, 'bulk', 'special_ticket', 50), result)
+        self.assertEqual(self.count(), 50)
+        with self.assertRaises(ShopError):
+            self.shop.buy(1, 10, 'bulk', 'special_ticket', 1)
+        for quantity in (0, 51, -1, True, 1.5, '2'):
+            with self.assertRaises(ShopError):
+                self.shop.buy(1, 10, 'invalid', 'special_ticket', quantity)
+        with self.assertRaises(ShopError):
+            self.shop.buy(1, 10, 'xp-bulk', 'xp5', 2)
+        with self.assertRaises(ShopError):
+            self.shop.buy(1, 10, 'poor-bulk', 'special_ticket', 50)
+        self.assertEqual(self.count(), 50)
 
     def test_concurrent_same_event_is_counted_once_and_guilds_are_isolated(self):
         with ThreadPoolExecutor(max_workers=4) as pool:
@@ -170,6 +187,29 @@ class TicketUITests(unittest.IsolatedAsyncioTestCase):
         await service.purchase(self.interaction, 'special_ticket')
         service.sync.assert_not_awaited()
         self.assertEqual(self.bot.ticket_store.ranking(1)[0]['count'], 1)
+
+    async def test_quantity_modal_shows_total_and_confirmation_buys_selected_count_once(self):
+        from shop import TicketQuantityModal
+        levels = LevelStore(Path(self.temp.name) / 'levels.sqlite3')
+        service = ShopService(self.bot, ShopStore(self.casino, levels))
+        self.casino.edit(1, 10, 'bulk-ui', 'set', 2500, 99)
+        modal = TicketQuantityModal(service, 10, 'special_ticket', 0, 1)
+        self.interaction.response.edit_message = AsyncMock()
+        modal.quantity_input._value = '50'
+        await modal.on_submit(self.interaction)
+        result = self.interaction.response.edit_message.call_args.kwargs
+        self.assertIn('2,500', result['embed'].description)
+        view = result['view']
+        buy = next(child for child in view.children if child.label == '購入する')
+        await buy.callback(self.interaction)
+        await buy.callback(self.interaction)
+        self.assertEqual(self.casino.balance(1, 10), 0)
+        self.assertEqual(self.bot.ticket_store.ranking(1)[0]['count'], 50)
+        for bad in ('0', '51', '-1', 'a', '1.5'):
+            modal.quantity_input._value = bad
+            self.interaction.response.edit_message.reset_mock()
+            await modal.on_submit(self.interaction)
+            self.interaction.response.edit_message.assert_not_awaited()
 
     async def test_tensei_and_context_menu_award_executor_once_after_success(self):
         from tensei import register_tensei
