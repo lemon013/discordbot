@@ -12,7 +12,17 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / 'Discord-GameBot' / '.env')
 import asyncio
 import logging
-logging.basicConfig(level=logging.INFO)
-from player_backup import bootstrap
-asyncio.run(bootstrap())
-runpy.run_path(str(ROOT / 'Discord-GameBot' / 'bot.py'), run_name='__main__')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(name)s:%(message)s')
+from runtime_probe import install
+probe = install()
+try:
+    from player_backup import bootstrap
+    asyncio.run(bootstrap())
+    runpy.run_path(str(ROOT / 'Discord-GameBot' / 'bot.py'), run_name='__main__')
+except BaseException as exc:
+    logging.getLogger('runtime_probe').error('Cloud entry exited (boot=%s, error_type=%s)', probe.boot, type(exc).__name__)
+    raise
+else:
+    logging.getLogger('runtime_probe').warning('Cloud entry returned normally (boot=%s)', probe.boot)
+finally:
+    probe.stop_event.set()

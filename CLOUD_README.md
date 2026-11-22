@@ -1,5 +1,11 @@
 # MWSでのクラウド起動
 
+## 終了原因の診断
+
+`cloud_main.py` は起動ごとの `Runtime boot` 識別番号と、15秒ごとの `Runtime sample` を記録します。`rss_mib` はBot単体、`process_tree_rss_mib` は取得できた子・孫プロセスを含むRSSの概算合計です。共有ページの重複があり、MWSの課金上の使用量とは一致しません。`cpu_pct` はBot単体、`loop_lag_s` はメイン処理の応答遅延です。読み取り不可の値は `None` とします。環境変数・コマンドライン・会話内容は収集しません。
+
+`Runtime termination signal` はSIGTERM/SIGHUPの受信です。ホスト停止・デプロイ・運営操作などの区別はMWS側の履歴が必要です。`Cloud entry exited` はPython例外などによる終了、`Cloud entry returned normally` はBotの起動処理が通常復帰したことを示します。処理遅延時と一部のネイティブクラッシュでは、変数の値を含めず関数名・行番号を記録します。SIGKILL・ホスト/コンテナ停止などでは終了ログを残せないため、終了ログの欠落だけでメモリ不足と断定しないでください。再発時は直前の数分間と次の起動までのログを保存し、MWSの終了コード・停止履歴と照合します。
+
 MWSはPythonで cloud_main.py を起動してください。DISCORD_BOT_TOKEN はゲームBotのトークンです。
 ゲーム、/player status、/vs はクラウドで利用できます。
 

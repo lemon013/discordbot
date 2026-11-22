@@ -1,6 +1,7 @@
 """Log gateway lifecycle without payloads, credentials or user messages."""
 import logging
 import os
+import sys
 import time
 
 
@@ -29,6 +30,9 @@ def register_connection_health(bot):
                  event, pid, now - started, downtime)
 
     async def on_ready():
+        probe = getattr(sys.modules.get('runtime_probe'), 'ACTIVE', None)
+        if probe is not None:
+            probe.bind()
         await restored('ready')
 
     async def on_resumed():
