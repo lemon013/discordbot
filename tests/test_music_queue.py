@@ -10,7 +10,7 @@ import discord
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'Discord-GameBot'))
 from sound import Sound, SoundError
-from music_queue import Music, MusicView, Track
+from music_queue import Music, MusicView, Track, SearchResultsView
 from youtube_play import normalize_playlist, load_playlist, MAX_QUEUE
 import youtube_worker
 
@@ -74,6 +74,36 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
     async def settle(self):
         for _ in range(20):
             await asyncio.sleep(0)
+
+    async def test_search_button_from_text_channel_adds_selected_url_to_callers_vc_queue(self):
+        self.guild.voice_client = self.voice
+        self.sound.playing[1] = SimpleNamespace(title='Existing music')
+        interaction = self.call()
+        text_channel = SimpleNamespace(id=9)
+        interaction.channel, interaction.channel_id = text_channel, 9
+        view = SearchResultsView(self.music, [{'url': URL_A}, {'url': URL_B}])
+        await view.children[1].callback(interaction)
+        await self.settle()
+        self.assertEqual([track.url for track in self.music.sessions[1].queue], [URL_B])
+        self.assertIs(self.music.sessions[1].channel, self.channel)
+        self.assertIs(interaction.channel, text_channel)
+        self.sound.play.assert_not_awaited()
+        self.assertTrue(interaction.response.send_message.call_args.kwargs['ephemeral'])
+
+    async def test_search_button_rejects_nonparticipants_and_another_active_vc(self):
+        view = SearchResultsView(self.music, [{'url': URL_A}])
+        interaction = self.call(joined=False)
+        await view.children[0].callback(interaction)
+        self.assertFalse(self.music.sessions)
+        self.assertTrue(interaction.response.send_message.call_args.kwargs['ephemeral'])
+        self.guild.voice_client = self.voice
+        other = Mock(spec=discord.VoiceChannel)
+        other.id = 999
+        interaction = self.call(channel=other)
+        await view.children[0].callback(interaction)
+        self.assertFalse(self.music.sessions)
+        self.sound.play.assert_not_awaited()
+        self.assertIn('Botが参加', interaction.edit_original_response.call_args.kwargs['content'])
 
     async def cleanup(self):
         for session in self.music.sessions.values():

@@ -89,6 +89,37 @@ class MusicView(discord.ui.View):
         await self.service.control(interaction, 'loop_queue')
 
 
+class SearchPlaybackContext:
+    """Reply to the button interaction while authorizing the caller's actual VC."""
+    def __init__(self, interaction, channel):
+        self.interaction, self.channel = interaction, channel
+
+    def __getattr__(self, name):
+        return getattr(self.interaction, name)
+
+
+class SearchResultButton(discord.ui.Button):
+    def __init__(self, service, index, url):
+        super().__init__(label=f'候補{index}', style=discord.ButtonStyle.primary, row=(index - 1) // 4)
+        self.service, self.video_url = service, normalize_url(url)
+
+    async def callback(self, interaction):
+        voice = getattr(interaction.user, 'voice', None)
+        channel = getattr(voice, 'channel', None)
+        if interaction.guild is None or not isinstance(channel, discord.VoiceChannel):
+            await interaction.response.send_message('再生するVCに参加してから候補ボタンを押してください。',
+                ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+            return
+        await self.service.enqueue(SearchPlaybackContext(interaction, channel), self.video_url)
+
+
+class SearchResultsView(discord.ui.View):
+    def __init__(self, service, entries):
+        super().__init__(timeout=600)
+        for index, entry in enumerate(entries, 1):
+            self.add_item(SearchResultButton(service, index, entry['url']))
+
+
 class Music:
     def __init__(self, bot, sound):
         self.bot, self.sound = bot, sound
@@ -339,8 +370,9 @@ class Music:
                     value=f'{safe_title(entry["title"])}\n{entry["url"]}', inline=False)
             if not entries:
                 embed.description = '該当する動画が見つかりませんでした。別のキーワードで検索してください。'
-            embed.set_footer(text='再生するにはVCのチャットで /play url:動画のリンク を実行してください。')
+            embed.set_footer(text='VCに参加して候補ボタンを押すと再生・キュー追加できます。ボタンは10分間有効です。')
             await interaction.edit_original_response(content=None, embed=embed,
+                                                    view=SearchResultsView(self, entries) if entries else None,
                                                     allowed_mentions=discord.AllowedMentions.none())
         except SoundError as exc:
             await self.sound.status(interaction, str(exc))

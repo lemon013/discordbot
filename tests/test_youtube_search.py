@@ -90,6 +90,12 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         result = interaction.edit_original_response.call_args.kwargs
         self.assertIsNone(result['content'])
         self.assertEqual(len(result['embed'].fields), 7)
+        self.assertEqual([button.label for button in result['view'].children], [f'候補{i}' for i in range(1, 8)])
+        self.assertEqual([button.video_url for button in result['view'].children], [entry['url'] for entry in entries])
+        for row in result['view'].to_components():
+            for button in row['components']:
+                self.assertIn('custom_id', button)
+                self.assertNotIn('url', button)
         self.assertNotIn('@everyone', str(result['embed'].to_dict()))
         for field, video in zip(result['embed'].fields, IDS):
             self.assertIn('https://www.youtube.com/watch?v=' + video, field.value)
@@ -106,6 +112,7 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         with patch('music_queue.search_youtube', AsyncMock(return_value=[])):
             await service.search(interaction, 'nothing')
         self.assertIn('見つかりません', interaction.edit_original_response.call_args.kwargs['embed'].description)
+        self.assertIsNone(interaction.edit_original_response.call_args.kwargs['view'])
         with patch('music_queue.search_youtube', AsyncMock(side_effect=RuntimeError('private-provider-body'))):
             await service.search(interaction, 'test')
         self.assertNotIn('private-provider-body', sound.status.call_args.args[1])
