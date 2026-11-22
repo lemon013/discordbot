@@ -732,7 +732,9 @@ register_tensei(bot)
 from kakigoori import register_kakigoori
 register_kakigoori(bot)
 from gemini_chat import register_gemini
-register_gemini(bot)
+gemini_service = register_gemini(bot)
+from aki import register_aki
+register_aki(bot, gemini_service)
 from leveling import register_leveling
 bot.leveling_service = register_leveling(bot)
 from casino import register_casino
