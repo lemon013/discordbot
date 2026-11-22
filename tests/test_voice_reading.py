@@ -121,6 +121,12 @@ class ReadingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(other.get('user', 2, {})['speed'], 1.5)
         self.assertEqual(other.get('guild', 1, {})['music_volume'], 25)
         self.assertEqual(other.get('user', 7, {'speed': 1}), {'speed': 1})
+
+    def test_voicevox_is_default_and_previous_google_preferences_do_not_call_google(self):
+        self.providers.base = ''
+        self.assertEqual(self.service.preference(2)['provider'], 'voicevox')
+        self.store.put('user', 2, dict(provider='google', voice='ja-JP-Standard-A', speed=1.5))
+        self.assertEqual(self.service.preference(2), dict(provider='voicevox', voice='3', speed=1.5))
     def test_text_filters_and_dictionary_do_not_cascade_or_read_spoilers(self):
         self.message.clean_content = 'abc https://example.org 😀 <:smile:123> ||secret|| ```code```'
         result = reading_text(self.message, DEFAULT, {'abc': 'def', 'def': 'bad'})

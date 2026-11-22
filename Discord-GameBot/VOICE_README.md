@@ -1,6 +1,6 @@
 # VCチャット読み上げ
 
-音楽・サウンドボード・読み上げは1つのVC接続で混ぜて再生します。Google Cloud Text-to-SpeechとVOICEVOXの2種類に対応します。設定しないサービスは利用できません。Discordユーザーの声を録音する機能ではありません。
+音楽・サウンドボード・読み上げは1つのVC接続で混ぜて再生します。現在はVOICEVOX専用です。Googleの認証・課金登録は不要です。VOICEVOXの実行環境は別途必要です。Discordユーザーの声を録音する機能ではありません。
 
 ## 初回の準備
 
@@ -21,27 +21,21 @@ Botのプロフィールへ、少なくとも次を掲載してください（�
 
 `/voice change` 等にも「クレジットはBotのプロフィール欄を参照してください。」と表示します。クレジット表示に加え、音源規約の禁止用途も遵守してください。録音・配信等で音声を再利用する場合も、それぞれの利用条件を確認してください。
 
-### Google Cloud Text-to-Speech
+### MWS無料プランでの準備状況
 
-Google Cloud側でプロジェクトのCloud Text-to-Speech APIと必要な課金設定を有効にします。Googleの利用料金・割当が適用されます。Geminiのキーをそのまま使う設定ではありません。
+標準エンジン全体は無料プランの保存容量に入りません。必要な音声モデルだけを使用するコア構成を検討していますが、実行時のメモリはまだ検証できていません。自動ダウンロードやモデルの起動は追加していません。
 
-認証は次のどちらかです。
+Bot更新後、管理者が `/voice diagnose` を実行してください。コンテナのメモリ上限・現在使用量・Bot自身の使用量を表示します。起動時のログにも同じ診断を一度だけ出します。接続先URL・APIキーなどの値は出しません。PCでの実行結果ではなく、MWSで動いているBotの結果が必要です。
 
-- 標準のApplication Default Credentials。サービスアカウントを使う場合は、認証JSONファイルへの絶対パスを `GOOGLE_APPLICATION_CREDENTIALS` に設定します。ファイルはリポジトリへ入れず、ホストの秘密情報用の保存先へ配置します。
-- 対象APIで利用できるGoogle CloudのAPIキーを `GOOGLE_TTS_API_KEY` に設定する方法。キーをコードやDiscordへ投稿しないでください。
+ファイルシステムの空き容量は、ホスト全体の情報が見える場合があります。MWSアカウントの保存容量枠の残量とは別なので、この数値を根拠に大量のファイルをダウンロードしないでください。診断は音声エンジンをインストールせず、既存Botと同じプロセスで軽量な情報取得だけを行います。
 
-日本語Standard/WaveNet音声をAPIから取得し、声と0.5〜2.0倍速を選べます。VOICEVOX_URL設定時の初期音声はずんだもん（ID 3）、それ以外はGoogleのja-JP-Standard-Aです。各利用者が `/voice change` で選び直せます。Google利用時は読み上げ対象の文章をGoogleへ送信します。VOICEVOX利用時は指定エンジンへ送信します。
-
-公式資料：
-- https://docs.cloud.google.com/text-to-speech/docs/reference/rest/v1/text/synthesize
-- https://voicevox.github.io/voicevox_engine/api/
-- https://voicevox.hiroshiba.jp/term/
-- https://zunko.jp/con_ongen_kiyaku.html
+Google音声は選択肢から外し、過去にGoogle音声を選択した利用者もVOICEVOXを使用するようにしています。声の初期値はずんだもんのID 3です。声の変更には、動作するVOICEVOX接続先の設定が必要です。
 
 ## コマンド
 
 | コマンド | 動作 |
 | --- | --- |
+| `/voice diagnose` | MWS実行環境・使用メモリを表示（管理者用） |
 | `/voice join` | 自分が参加しているVCへ接続し、そのVC内チャットの読み上げ開始・再開 |
 | `/voice stop` | 読み上げと待機文だけ停止。音楽・サウンドボード・VC接続は継続 |
 | `/voice leave` | 読み上げ・音楽・サウンドボードを停止して退出 |

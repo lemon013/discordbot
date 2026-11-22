@@ -168,9 +168,10 @@ class Reading:
         return self.configs[guild_id]
 
     def preference(self, uid):
-        provider = 'voicevox' if self.providers.base else 'google'
-        return self.store.get('user', uid, dict(provider=provider,
-            voice='3' if provider == 'voicevox' else 'ja-JP-Standard-A', speed=1.0))
+        preference = self.store.get('user', uid, dict(provider='voicevox', voice='3', speed=1.0))
+        if preference['provider'] != 'voicevox':
+            preference = dict(provider='voicevox', voice='3', speed=preference.get('speed', 1.0))
+        return preference
 
     def channel(self, interaction):
         state = getattr(interaction.user, 'voice', None)
@@ -331,12 +332,14 @@ def register_voice(bot, sound):
         await run(interaction, op)
 
     @group.command(name='change', description='自分の読み上げ音声と速度を変更します')
-    @app_commands.choices(provider=[app_commands.Choice(name='VOICEVOX', value='voicevox'), app_commands.Choice(name='Google', value='google')])
+    @app_commands.choices(provider=[app_commands.Choice(name='VOICEVOX', value='voicevox')])
     async def change(interaction: discord.Interaction, provider: str | None = None, voice: str | None = None,
                      speed: app_commands.Range[float, 0.5, 2.0] | None = None):
         async def op():
             preference = service.preference(interaction.user.id)
             chosen = provider or preference['provider']
+            if chosen != 'voicevox':
+                raise SoundError('現在はVOICEVOX専用です。Google音声は使用しません。')
             catalog = await service.providers.voices(chosen)
             selected = voice or (preference['voice'] if chosen == preference['provider'] and preference['voice'] in catalog else next(iter(catalog)))
             if selected not in catalog:
@@ -349,7 +352,7 @@ def register_voice(bot, sound):
     @change.autocomplete('voice')
     async def voices(interaction: discord.Interaction, current: str):
         try:
-            provider = getattr(interaction.namespace, 'provider', None) or service.preference(interaction.user.id)['provider']
+            provider = 'voicevox'
             catalog = await asyncio.wait_for(service.providers.voices(provider), 2)
             return [app_commands.Choice(name=label[:100], value=key) for key, label in catalog.items()
                     if current.casefold() in (key + label).casefold()][:25]
@@ -470,6 +473,25 @@ def register_voice(bot, sound):
         await run(interaction, op)
 
     bot.tree.add_command(group)
+    @group.command(name='diagnose', description='MWSのメモリ・実行環境を確認します（管理者）')
+    async def diagnose(interaction: discord.Interaction):
+        async def op():
+            service.admin(interaction)
+            from voice_diagnostics import snapshot, describe
+            data = await asyncio.to_thread(snapshot, service.store.path.parent)
+            return describe(data, bool(service.providers.base))
+        await run(interaction, op)
+
+    diagnosed = False
+    async def ready_diagnostics():
+        nonlocal diagnosed
+        if diagnosed:
+            return
+        diagnosed = True
+        from voice_diagnostics import snapshot, describe
+        data = await asyncio.to_thread(snapshot, service.store.path.parent)
+        log.info('VOICEVOX runtime diagnostics:\n%s', describe(data, bool(service.providers.base)))
+    bot.add_listener(ready_diagnostics, 'on_ready')
     bot.add_listener(service.on_message, 'on_message')
     bot.add_listener(service.on_voice_state_update, 'on_voice_state_update')
     return service
