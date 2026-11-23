@@ -19,6 +19,7 @@ from discord import app_commands
 
 from sound import SoundError, MAX_BYTES
 from storage import database_path
+from preferences import VoiceStore
 from voice_mixer import VoiceHub
 from quest_voice import QuestVoice, VOICES, REVIEWED_NAMES
 from voice_catalog import CHARACTERS, normalized, voice_info, credits_text
@@ -33,24 +34,6 @@ def short_display(text):
 
 DEFAULT = dict(music_volume=70, tts_volume=100, board_volume=80, duck=True, duck_volume=30,
                names=False, urls='label', emoji=False, attachments=True, bots=False, max_chars=150)
-
-
-class VoiceStore:
-    def __init__(self, path=None):
-        self.path = Path(path) if path else database_path('level')
-        with closing(sqlite3.connect(self.path)) as db:
-            db.execute('CREATE TABLE IF NOT EXISTS voice_preferences (scope TEXT, item TEXT, value TEXT NOT NULL, PRIMARY KEY(scope,item))')
-            db.commit()
-
-    def get(self, scope, item, default):
-        with closing(sqlite3.connect(self.path)) as db:
-            row = db.execute('SELECT value FROM voice_preferences WHERE scope=? AND item=?', (scope, str(item))).fetchone()
-        return json.loads(row[0]) if row else dict(default)
-
-    def put(self, scope, item, value):
-        with closing(sqlite3.connect(self.path)) as db:
-            db.execute('INSERT OR REPLACE INTO voice_preferences VALUES(?,?,?)', (scope, str(item), json.dumps(value)))
-            db.commit()
 
 
 class Providers:
@@ -242,6 +225,8 @@ class Reading:
         if not voice or not voice.is_connected() or voice.channel.id != message.channel.id:
             await self.halt(guild.id)
             return
+        if not (await asyncio.to_thread(self.store.personal, message.author.id))['reading_enabled']:
+            return
         queue = self.jobs.setdefault(guild.id, asyncio.Queue(maxsize=30))
         if queue.full():
             return
@@ -252,6 +237,8 @@ class Reading:
             self.workers[guild.id] = asyncio.create_task(self.consume(guild), name='voice-reading')
 
     async def speak(self, guild, message, text):
+        if not (await asyncio.to_thread(self.store.personal, message.author.id))['reading_enabled']:
+            return
         preference = self.preference(message.author.id)
         data = await self.providers.synthesize(text, preference)
         async def save(path):

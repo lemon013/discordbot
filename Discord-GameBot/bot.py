@@ -660,7 +660,9 @@ register_youtube_play(bot, sound_service)
 from soundboard import register_soundboard
 register_soundboard(bot, sound_service)
 from voice_reading import register_voice
-register_voice(bot, sound_service)
+reading_service = register_voice(bot, sound_service)
+from personal_settings import register_personal_settings
+register_personal_settings(bot, reading_service)
 from ping import register_ping
 register_ping(bot)
 from connection_health import register_connection_health

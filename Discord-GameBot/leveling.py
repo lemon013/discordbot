@@ -199,10 +199,14 @@ def eligible_voice(guild):
     return eligible
 
 
+from preferences import VoiceStore
+
+
 class Leveling:
     def __init__(self, bot, store=None):
         self.bot = bot
         self.store = store or LevelStore()
+        self.personal_store = VoiceStore(self.store.path)
         self.sessions = {}
         self.locks = {}
         self.connected = False
@@ -237,6 +241,8 @@ class Leveling:
                     log.warning('Could not grant regular role in guild %s to user %s', guild.id, result['user_id'])
                     continue
                 self.rewarded.add(key)
+                if not (await asyncio.to_thread(self.personal_store.personal, result['user_id']))['level_notifications']:
+                    continue
                 channel = (guild.get_channel(cfg['notify_channel']) if cfg['notify_channel'] else None) or fallback
                 if channel is None:
                     voice = getattr(member, 'voice', None)
@@ -267,9 +273,13 @@ class Leveling:
         channel = guild.get_channel(cfg['notify_channel']) if cfg['notify_channel'] else fallback
         if channel is None:
             return
+        visible = []
+        for result in results:
+            if result and (await asyncio.to_thread(self.personal_store.personal, result['user_id']))['level_notifications']:
+                visible.append(result)
         lines = [f"🎉 <@{r['user_id']}> が **Lv.{r['after']}** にレベルアップしました！"
                  + (f" 💎 {rewards[r['user_id']]:,}ジュエル獲得！" if rewards.get(r['user_id']) else '')
-                 for r in results if r and r['after'] > r['before']]
+                 for r in visible if r['after'] > r['before']]
         try:
             for offset in range(0, len(lines), 10):
                 await channel.send('\n'.join(lines[offset:offset + 10]), allowed_mentions=discord.AllowedMentions.none())
