@@ -39,11 +39,13 @@ def grant_in(db, casino, alias, guild_id, user_id, event_id, xp, levels=0, gems=
     target = min(MAX_LEVEL, intermediate + levels)
     # Keep progress within the level; do not discard accumulated XP at the cap.
     bonus_xp = threshold(target, base, step) - threshold(intermediate, base, step)
-    total_xp = before_xp + xp + bonus_xp
+    from xp_role_bonus import apply_bonus
+    earned_xp = apply_bonus(db, alias, guild_id, user_id, xp + bonus_xp)
+    total_xp = before_xp + earned_xp
     db.execute(f'UPDATE {alias}.level_users SET xp=? WHERE guild_id=? AND user_id=?', (total_xp, guild_id, user_id))
     wallet = casino.wallet(db, guild_id, user_id)
     result = dict(user_id=user_id, balance=wallet['balance'] + gems, base_xp=xp, level_bonus=levels,
-                  gems=gems, xp=xp + bonus_xp, total_xp=total_xp, levels_gained=target - intermediate,
+                  gems=gems, xp=earned_xp, role_bonus_xp=earned_xp - xp - bonus_xp, total_xp=total_xp, levels_gained=target - intermediate,
                   before=level_for(before_xp, base, step), after=level_for(total_xp, base, step))
     casino.finish(db, event_id, guild_id, user_id, 'solo_reward', wallet['balance'], result, time.time())
     return {**result, 'new': True}
@@ -77,6 +79,8 @@ async def notify_solo(bot, guild, channel, result):
 
 
 async def reward_solo(bot, guild, channel, user_id, event_id, xp, levels=0, gems=0):
+    from xp_role_bonus import remember_roles
+    await remember_roles(bot, guild, user_id)
     result = await asyncio.to_thread(bot.solo_rewards.grant, guild.id, user_id, 'solo:' + event_id, xp, levels, gems)
     await notify_solo(bot, guild, channel, result)
     return result

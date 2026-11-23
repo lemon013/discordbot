@@ -258,6 +258,8 @@ class Casino:
         guild_id, user_id, event_id = interaction.guild_id, member.id, str(interaction.id)
         try:
             if action in GAME_NAMES:
+                from xp_role_bonus import remember_roles
+                await remember_roles(self.bot, interaction.guild, user_id, member)
                 result = await asyncio.to_thread(self.store.play, guild_id, user_id, event_id, action, **values)
                 net = result['payout'] - result['wager']
                 embed = discord.Embed(title=f'🎰 {GAME_NAMES[action]}', description=result['outcome'],
@@ -269,7 +271,7 @@ class Casino:
                 embed.add_field(name='収支', value=f'💎 {net:+,}')
                 embed.add_field(name='残高', value=f"💎 {result['balance']:,} ジュエル", inline=False)
                 if result.get('xp_reward'):
-                    embed.add_field(name='経験値', value=f"+{result['xp_reward']['base_xp']} XP", inline=False)
+                    embed.add_field(name='経験値', value=f"+{result['xp_reward']['xp']} XP", inline=False)
                     from solo_rewards import notify_solo
                     await notify_solo(self.bot, interaction.guild, interaction.channel, result['xp_reward'])
                 await interaction.edit_original_response(embed=embed, allowed_mentions=discord.AllowedMentions.none())

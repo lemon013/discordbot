@@ -24,6 +24,8 @@ class PartyRewards(ShopStore):
             gems, xp = (100, 10) if won else (50, 5)
             if game_id.startswith('othello:'):
                 gems, xp = gems * 3, xp * 3
+            from xp_role_bonus import apply_bonus
+            xp = apply_bonus(db, alias, guild_id, user_id, xp)
             cfg_row = db.execute(f'SELECT * FROM {alias}.level_config WHERE guild_id=?', (guild_id,)).fetchone()
             cfg = {**DEFAULTS, **(dict(cfg_row) if cfg_row else {})}
             db.execute(f'INSERT OR IGNORE INTO {alias}.level_users(guild_id,user_id) VALUES(?,?)', (guild_id, user_id))
@@ -40,6 +42,8 @@ async def reward_party(bot, guild, channel, game_id, outcomes):
     import asyncio
     store = bot.party_rewards
     for user_id, won in outcomes.items():
+        from xp_role_bonus import remember_roles
+        await remember_roles(bot, guild, user_id)
         result = await asyncio.to_thread(store.grant,guild.id,user_id,game_id,won)
         cfg = await asyncio.to_thread(store.levels.config,guild.id)
         await bot.leveling_service.notify(guild,[result],cfg,channel)

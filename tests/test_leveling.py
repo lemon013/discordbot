@@ -255,7 +255,7 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
         with patch('leveling.LevelStore', return_value=self.store):
             register_leveling(bot)
-        self.assertEqual({c.name for c in bot.tree.get_commands()}, {'rank', 'leaderboard', 'level', 'xp'})
+        self.assertEqual({c.name for c in bot.tree.get_commands()}, {'rank', 'leaderboard', 'level', 'xp', 'xpbonus'})
         self.assertTrue(bot.tree.get_command('level').default_permissions.manage_guild)
         self.assertTrue(bot.intents.voice_states)
         self.assertIn('on_voice_state_update', bot.extra_events)

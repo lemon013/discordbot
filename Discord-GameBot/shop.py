@@ -119,11 +119,13 @@ class ShopStore:
                 cfg = {**DEFAULTS, **(dict(cfg_row) if cfg_row else {})}
                 db.execute(f'INSERT OR IGNORE INTO {alias}.level_users(guild_id,user_id) VALUES(?,?)', (guild_id, user_id))
                 before = db.execute(f'SELECT xp FROM {alias}.level_users WHERE guild_id=? AND user_id=?', (guild_id, user_id)).fetchone()[0]
-                if before > 9223372036854775807 - item['xp']:
+                from xp_role_bonus import apply_bonus
+                grant_xp = apply_bonus(db, alias, guild_id, user_id, item['xp'])
+                if before > 9223372036854775807 - grant_xp:
                     raise ShopError('XPの上限を超えるため購入できません。')
-                db.execute(f'UPDATE {alias}.level_users SET xp=xp+?,shop_xp=shop_xp+? WHERE guild_id=? AND user_id=?', (item['xp'], item['xp'], guild_id, user_id))
-                result.update(xp=item['xp'], before=level_for(before, cfg['base_xp'], cfg['step_xp']),
-                              after=level_for(before + item['xp'], cfg['base_xp'], cfg['step_xp']))
+                db.execute(f'UPDATE {alias}.level_users SET xp=xp+?,shop_xp=shop_xp+? WHERE guild_id=? AND user_id=?', (grant_xp, grant_xp, guild_id, user_id))
+                result.update(xp=grant_xp, before=level_for(before, cfg['base_xp'], cfg['step_xp']),
+                              after=level_for(before + grant_xp, cfg['base_xp'], cfg['step_xp']))
             else:
                 db.execute('INSERT OR IGNORE INTO shop_owned VALUES(?,?,?,?)', (guild_id, user_id, item_id, time.time()))
                 db.execute('INSERT OR IGNORE INTO shop_active(guild_id,user_id) VALUES(?,?)', (guild_id, user_id))
@@ -204,12 +206,16 @@ class ShopService:
     async def purchase(self, interaction, item_id, *, page=0, quantity=1):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
+            from xp_role_bonus import remember_roles
+            await remember_roles(self.bot, interaction.guild, interaction.user.id, interaction.user)
             result = await asyncio.to_thread(self.store.buy, interaction.guild_id, interaction.user.id, str(interaction.id), item_id, quantity)
         except (ShopError, CasinoError) as error:
             await interaction.edit_original_response(content=str(error), embed=None, view=None)
             return
         item = ITEMS[item_id]
         message = f"✅ {item['name']}を{'装備' if result['equipped'] else '購入'}しました！\n支払い：💎 {result['price']:,} / 残高：💎 {result['balance']:,}"
+        if item['kind'] == 'xp':
+            message += f'\n獲得XP：＋{result["xp"]:,} XP（ロール加算込み）'
         if item['kind'] == 'ticket':
             message += f'\n🎟️ スペシャルチケット +{result["tickets"]}枚（/ticket balance で確認）'
         profile = await asyncio.to_thread(self.store.profile, interaction.guild_id, interaction.user.id)

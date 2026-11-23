@@ -225,7 +225,7 @@ def blackjack_embed(state):
         embed.add_field(name='自動スタンド', value=f"<t:{int(state['expires_at'])}:R>", inline=False)
     embed.set_footer(text='通常勝利2倍／最初の21は2.5倍／引き分け返却。2分操作がないと自動スタンド。')
     if state.get('xp_reward'):
-        embed.add_field(name='経験値', value=f"+{state['xp_reward']['base_xp']} XP", inline=False)
+        embed.add_field(name='経験値', value=f"+{state['xp_reward']['xp']} XP", inline=False)
     return embed
 
 
@@ -254,6 +254,8 @@ class BlackjackService:
     async def start(self, interaction, wager=None):
         await interaction.response.defer(thinking=True)
         try:
+            from xp_role_bonus import remember_roles
+            await remember_roles(self.bot, getattr(interaction, 'guild', None), interaction.user.id, interaction.user)
             state = await asyncio.to_thread(self.store.start, interaction.guild_id, interaction.user.id, str(interaction.id), wager)
             if state.get('xp_reward'):
                 from solo_rewards import notify_solo
@@ -270,6 +272,8 @@ class BlackjackService:
     async def act(self, interaction, previous, action):
         await interaction.response.defer()
         try:
+            from xp_role_bonus import remember_roles
+            await remember_roles(self.bot, getattr(interaction, 'guild', None), interaction.user.id, interaction.user)
             state = await asyncio.to_thread(self.store.act, interaction.guild_id, interaction.user.id,
                 previous['round_id'], str(interaction.id), action, previous['revision'])
             if state.get('xp_reward'):
@@ -286,6 +290,10 @@ class BlackjackService:
     @tasks.loop(seconds=15)
     async def expire_tick(self):
         try:
+            from xp_role_bonus import remember_roles
+            for active in await asyncio.to_thread(self.store.active):
+                if active['expires_at'] <= time.time():
+                    await remember_roles(self.bot, self.bot.get_guild(active['guild_id']), active['user_id'])
             states = await asyncio.to_thread(self.store.expire)
             for state in states:
                 if state.get('xp_reward'):

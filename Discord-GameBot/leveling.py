@@ -15,6 +15,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 from storage import database_path, mark_initialized
+from xp_role_bonus import BonusStore, apply_bonus, member_roles
 
 log = logging.getLogger(__name__)
 MAX_LEVEL = 100
@@ -71,6 +72,7 @@ class LevelStore:
                     migrated = True
             if migrated:
                 db.execute('UPDATE level_config SET text_xp_min=0,text_xp_max=0 WHERE text_xp=0')
+        self.bonuses = BonusStore(self.path)
         mark_initialized(self.path)
 
     def connect(self):
@@ -112,6 +114,7 @@ class LevelStore:
         xp = row['xp'] if row else 0
         if source == 'text_xp' and row and row['last_text'] is not None and now - row['last_text'] < cfg['cooldown']:
             return None
+        amount = apply_bonus(db, 'main', guild_id, user_id, amount)
         db.execute('INSERT OR IGNORE INTO level_users(guild_id,user_id) VALUES(?,?)', (guild_id, user_id))
         db.execute(f'UPDATE level_users SET xp=xp+?, {source}={source}+? WHERE guild_id=? AND user_id=?',
                    (amount, amount, guild_id, user_id))
@@ -121,22 +124,25 @@ class LevelStore:
         after = level_for(xp + amount, cfg['base_xp'], cfg['step_xp'])
         return dict(user_id=user_id, before=before, after=after, xp=xp + amount)
 
-    def award_text(self, guild_id, user_id, now=None):
+    def award_text(self, guild_id, user_id, now=None, *, roles=None):
         now = time.time() if now is None else now
         with closing(self.connect()) as db, db:
             db.execute('BEGIN IMMEDIATE')
             cfg = self.config_in(db, guild_id)
             if not cfg['enabled'] or not cfg['text_xp_max']:
                 return None, cfg
+            self.bonuses.remember_in(db, guild_id, user_id, roles)
             amount = random.randint(cfg['text_xp_min'], cfg['text_xp_max'])
             return self.add_in(db, guild_id, user_id, amount, 'text_xp', cfg, now), cfg
 
-    def award_voice(self, guild_id, minutes):
+    def award_voice(self, guild_id, minutes, *, roles=None):
         with closing(self.connect()) as db, db:
             db.execute('BEGIN IMMEDIATE')
             cfg = self.config_in(db, guild_id)
             if not cfg['enabled'] or not cfg['voice_xp']:
                 return [], cfg
+            for user_id, role_ids in (roles or {}).items():
+                self.bonuses.remember_in(db, guild_id, user_id, role_ids)
             results = [self.add_in(db, guild_id, user_id, count * cfg['voice_xp'], 'voice_xp', cfg)
                        for user_id, count in minutes if count > 0]
             return results, cfg
@@ -292,7 +298,7 @@ class Leveling:
         if not message.content.strip() and not message.attachments:
             return
         try:
-            result, cfg = await asyncio.to_thread(self.store.award_text, message.guild.id, message.author.id)
+            result, cfg = await asyncio.to_thread(self.store.award_text, message.guild.id, message.author.id, roles=member_roles(message.author))
             if result:
                 await self.notify(message.guild, [result], cfg, message.channel)
         except (sqlite3.Error, OSError):
@@ -325,7 +331,12 @@ class Leveling:
             for user_id in active:
                 self.sessions.setdefault((guild.id, user_id), now)
             if awards:
-                results, latest_cfg = await asyncio.to_thread(self.store.award_voice, guild.id, awards)
+                roles = {member.id: member_roles(member) for channel in guild.voice_channels for member in channel.members}
+                if isinstance(guild, discord.Guild) and await asyncio.to_thread(self.store.bonuses.list, guild.id):
+                    from xp_role_bonus import remember_roles
+                    for user_id, _ in awards:
+                        roles[user_id] = await remember_roles(self.bot, guild, user_id)
+                results, latest_cfg = await asyncio.to_thread(self.store.award_voice, guild.id, awards, roles=roles)
                 await self.notify(guild, results, latest_cfg)
 
     async def on_voice_state_update(self, member, before, after):
@@ -510,6 +521,8 @@ def register_leveling(bot):
                       amount: app_commands.Range[int, 0, 1000000000], member: discord.Member | None = None):
         await service.edit(interaction, 'xp', mode, amount, member)
 
+    from xp_role_bonus import register_xp_bonus
+    register_xp_bonus(bot, service)
     bot.tree.add_command(xp_group)
     bot.tree.add_command(group)
     for event in ('on_message', 'on_voice_state_update', 'on_ready', 'on_resumed', 'on_disconnect'):
