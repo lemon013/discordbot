@@ -3,6 +3,7 @@ import asyncio
 from collections import deque
 from dataclasses import dataclass, field
 import logging
+import time
 import uuid
 from types import SimpleNamespace
 
@@ -127,8 +128,8 @@ class Music:
     def __init__(self, bot, sound):
         self.bot, self.sound = bot, sound
         self.sessions = {}
-        self.slots = asyncio.Semaphore(2)
-        self.search_slots = asyncio.Semaphore(2)
+        self.slots = asyncio.Semaphore(1)
+        self.search_slots = self.slots
         sound.music = self
 
     def has_work(self, guild_id):
@@ -310,8 +311,18 @@ class Music:
         return had_work
 
     async def enqueue(self, interaction, url):
-        await interaction.response.send_message('曲をキューに追加します。', ephemeral=True,
-                                                allowed_mentions=discord.AllowedMentions.none())
+        ack_started = time.monotonic()
+        try:
+            await interaction.response.send_message('曲をキューに追加します。', ephemeral=True,
+                                                    allowed_mentions=discord.AllowedMentions.none())
+        except discord.NotFound as exc:
+            if exc.code != 10062:
+                raise
+            created = getattr(interaction, 'created_at', None)
+            age_ms = int((discord.utils.utcnow() - created).total_seconds() * 1000) if created else None
+            log.warning('Music interaction expired before enqueue; no track added (age_ms=%s, ack_ms=%.0f)',
+                        age_ms, (time.monotonic() - ack_started) * 1000)
+            return
         session, fetch = None, None
         try:
             playlist = normalize_playlist(url)

@@ -1,12 +1,14 @@
 """YouTube URL command feeding a local audio file to the existing voice player."""
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 import re
 import signal
 import subprocess
 import sys
+import weakref
 from urllib.parse import parse_qs, urlsplit
 
 import discord
@@ -17,6 +19,9 @@ MAX_DURATION = 30 * 60
 DOWNLOAD_TIMEOUT = 110
 MAX_QUEUE = 50
 SEARCH_LIMIT = 7
+WORKER_MEMORY_MIB = 300
+_worker_gates = weakref.WeakKeyDictionary()
+log = logging.getLogger(__name__)
 ERRORS = {
     'dependency': 'YouTube再生の準備ができていません。更新後のrequirements.txtでパッケージを再インストールしてください。',
     'live': 'ライブ配信・配信予約には対応していません。公開済みの通常動画を指定してください。',
@@ -161,7 +166,25 @@ async def search_youtube(query, slots):
         raise SoundError('YouTubeの検索結果を読み取れませんでした。時間をおいて再試行してください。') from None
 
 
+def memory_mib():
+    if sys.platform != 'linux':
+        return None
+    from runtime_probe import process_memory
+    return process_memory()[1]
+
+
 async def run_worker(url, destination, playlist=False, search=False):
+    # Searches, playlists and audio extraction share ONE process budget.
+    loop = asyncio.get_running_loop()
+    gate = _worker_gates.setdefault(loop, asyncio.Lock())
+    async with gate:
+        return await _run_worker(url, destination, playlist=playlist, search=search)
+
+
+async def _run_worker(url, destination, playlist=False, search=False):
+    usage = await asyncio.to_thread(memory_mib)
+    if usage is not None and usage >= WORKER_MEMORY_MIB:
+        raise SoundError('メモリ負荷が高いためYouTubeの取得を見送りました。再生中の音声が減ってから再試行してください。')
     worker = Path(__file__).with_name('youtube_worker.py')
     flags = ({'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
              if os.name == 'nt' else {'start_new_session': True})
@@ -169,10 +192,26 @@ async def run_worker(url, destination, playlist=False, search=False):
                    if not any(tag in key.upper() for tag in ('TOKEN', 'SECRET', 'API_KEY'))}
     # MWS can add its .packages directory to sys.path at launch time.
     environment['PYTHONPATH'] = os.pathsep.join(os.path.abspath(item or os.getcwd()) for item in sys.path)
+    # This bounds V8 old-space, not the complete Deno/process RSS.
+    environment['DENO_V8_FLAGS'] = '--max-old-space-size=64,--max-semi-space-size=4'
     mode = ['search'] if search else ['playlist'] if playlist else []
     arguments = [sys.executable, '-u', str(worker), url, str(destination)] + mode
     process = await asyncio.create_subprocess_exec(*arguments,
         stdout=asyncio.subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment, **flags)
+    exceeded = False
+
+    async def watch_memory():
+        nonlocal exceeded
+        while True:
+            await asyncio.sleep(0.5)
+            usage = await asyncio.to_thread(memory_mib)
+            if usage is not None and usage >= WORKER_MEMORY_MIB:
+                exceeded = True
+                log.warning('Stopping YouTube worker to protect Bot memory (tree_rss_mib=%.1f, budget_mib=%s)', usage, WORKER_MEMORY_MIB)
+                await kill_download(process)
+                return
+
+    monitor = asyncio.create_task(watch_memory(), name='youtube-memory-guard')
     try:
         output, _ = await asyncio.wait_for(process.communicate(), timeout=DOWNLOAD_TIMEOUT)
     except (asyncio.TimeoutError, asyncio.CancelledError) as exc:
@@ -180,6 +219,11 @@ async def run_worker(url, destination, playlist=False, search=False):
         if isinstance(exc, asyncio.CancelledError):
             raise
         raise SoundError('YouTubeの音声取得がタイムアウトしました。短い動画でもう一度試してください。') from None
+    finally:
+        monitor.cancel()
+        await asyncio.gather(monitor, return_exceptions=True)
+    if exceeded:
+        raise SoundError('Botの停止を避けるため、メモリ使用量が増えたYouTube取得処理を中止しました。短い動画や音声ファイルを利用してください。')
     return output
 
 

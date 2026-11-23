@@ -75,6 +75,14 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(20):
             await asyncio.sleep(0)
 
+    async def test_expired_initial_ack_never_adds_or_starts_a_track(self):
+        interaction = self.call()
+        interaction.response.send_message.side_effect = discord.NotFound(
+            SimpleNamespace(status=404, reason='Not Found'), {'code': 10062, 'message': 'Unknown interaction'})
+        await self.music.enqueue(interaction, URL_A)
+        self.assertFalse(self.music.sessions)
+        self.sound.play.assert_not_awaited()
+
     async def test_play_reward_owner_is_preserved_and_loop_keeps_same_reward_event(self):
         interaction = self.call(uid=55)
         await self.music.enqueue(interaction, URL_A)
