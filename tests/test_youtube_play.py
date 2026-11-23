@@ -108,6 +108,21 @@ class DownloadTests(unittest.IsolatedAsyncioTestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_real_node_challenge_provider_accepts_memory_options(self):
+        from yt_dlp.extractor.youtube.jsc._builtin.node import NodeJCP
+        runtime = SimpleNamespace(
+            runtime_info=SimpleNamespace(path=youtube_worker.node_runtime(), version_tuple=(24, 19, 0)),
+            ejs_setting=lambda key, default: default, logger=youtube_worker.QuietLogger(), _ARGS=['-'])
+        runtime._clean_stderr = lambda value: NodeJCP._clean_stderr(runtime, value)
+        options = '--max-old-space-size=128 --max-semi-space-size=4 --jitless'
+        with patch.dict(os.environ, {'NODE_OPTIONS': options}):
+            output = NodeJCP._run_js_runtime(runtime,
+                'console.log(JSON.stringify({rss:process.memoryUsage().rss, '
+                'heap:require("node:v8").getHeapStatistics().heap_size_limit}))')
+        values = json.loads(output)
+        self.assertLessEqual(values['heap'], 150 * 1024 * 1024)
+        self.assertGreater(values['rss'], 0)
+
     def test_worker_import_does_not_load_discord_or_voice_stack(self):
         code = ('import youtube_worker, sys; '
                 'assert not ({"discord", "sound", "music_queue", "youtube_play"} & sys.modules.keys())')
@@ -130,7 +145,7 @@ class WorkerTests(unittest.TestCase):
             path = Path(folder) / 'audio.webm'
             def extract(downloader, url, download):
                 self.assertEqual(url, URL)
-                self.assertTrue(Path(downloader.params['js_runtimes']['deno']['path']).is_file())
+                self.assertTrue(Path(downloader.params['js_runtimes']['node']['path']).is_file())
                 self.assertTrue(download)
                 path.write_bytes(b'audio')
                 return {'extractor_key': 'Youtube', 'title': 'configured'}

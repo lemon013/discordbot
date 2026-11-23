@@ -1,6 +1,9 @@
 """Isolated, terminable YouTube extraction. Stdout contains only a safe result."""
 import json
+import importlib.util
 import math
+import os
+import shutil
 from itertools import islice
 from pathlib import Path
 import sys
@@ -14,13 +17,24 @@ class QuietLogger:
     info = warning = error = debug
 
 
+def node_runtime():
+    """Find the bundled executable even when MWS .packages/bin is not on PATH."""
+    spec = importlib.util.find_spec('nodejs_wheel')
+    if spec and spec.submodule_search_locations:
+        for directory in spec.submodule_search_locations:
+            path = Path(directory) / ('node.exe' if os.name == 'nt' else 'bin/node')
+            if path.is_file():
+                return str(path)
+    path = shutil.which('node')
+    if path:
+        return path
+    raise ImportError('Node.js runtime missing')
+
+
 def download(url, destination):
     try:
         import yt_dlp
-        import deno
-        runtime = deno.find_deno_bin()
-        if not Path(runtime).is_file():
-            raise ImportError()
+        runtime = node_runtime()
     except (ImportError, RuntimeError, OSError):
         return {'ok': False, 'reason': 'dependency'}
     reason = None
@@ -54,7 +68,7 @@ def download(url, destination):
         'max_filesize': MAX_BYTES, 'progress_hooks': [progress],
         'socket_timeout': 15, 'retries': 1, 'fragment_retries': 1,
         'concurrent_fragment_downloads': 1, 'buffersize': 65536,
-        'js_runtimes': {'deno': {'path': runtime}},
+        'js_runtimes': {'node': {'path': runtime}},
     }
     try:
         with yt_dlp.YoutubeDL(options) as downloader:
@@ -73,8 +87,7 @@ def download(url, destination):
 def playlist(url):
     try:
         import yt_dlp
-        import deno
-        runtime = deno.find_deno_bin()
+        runtime = node_runtime()
     except (ImportError, RuntimeError, OSError):
         return {'ok': False, 'reason': 'dependency'}
     try:
@@ -84,7 +97,7 @@ def playlist(url):
         with yt_dlp.YoutubeDL({'extract_flat': 'in_playlist', 'noplaylist': False,
                 'playlistend': MAX_QUEUE, 'lazy_playlist': True, 'ignoreerrors': True,
                 'quiet': True, 'no_warnings': True, 'cachedir': False, 'logger': QuietLogger(),
-                'socket_timeout': 15, 'retries': 1, 'js_runtimes': {'deno': {'path': runtime}}}) as downloader:
+                'socket_timeout': 15, 'retries': 1, 'js_runtimes': {'node': {'path': runtime}}}) as downloader:
             info = downloader.extract_info(canonical, download=False)
             if not info or info.get('_type') not in ('playlist', 'multi_video'):
                 return {'ok': False, 'reason': 'unavailable'}

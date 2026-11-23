@@ -126,8 +126,9 @@ async def _run_worker(url, destination, playlist=False, search=False):
                    if not any(tag in key.upper() for tag in ('TOKEN', 'SECRET', 'API_KEY'))}
     # MWS can add its .packages directory to sys.path at launch time.
     environment['PYTHONPATH'] = os.pathsep.join(os.path.abspath(item or os.getcwd()) for item in sys.path)
-    # This bounds V8 old-space, not the complete Deno/process RSS.
-    environment['DENO_V8_FLAGS'] = '--max-old-space-size=128,--max-semi-space-size=4,--jitless'
+    # Override inherited Node options: no preloads or unrelated Bot flags in the worker.
+    # This bounds V8 old-space, not the complete Node/process RSS.
+    environment['NODE_OPTIONS'] = '--max-old-space-size=128 --max-semi-space-size=4 --jitless'
     mode = ['search'] if search else ['playlist'] if playlist else []
     arguments = [sys.executable, '-u', str(worker), url, str(destination)] + mode
     process = await asyncio.create_subprocess_exec(*arguments,
@@ -158,6 +159,9 @@ async def _run_worker(url, destination, playlist=False, search=False):
         await asyncio.gather(monitor, return_exceptions=True)
     if exceeded:
         raise SoundError('Botの停止を避けるため、メモリ使用量が増えたYouTube取得処理を中止しました。時間をおいて再試行するか、音声ファイルを利用してください。')
+    if getattr(process, 'returncode', 0):
+        log.warning('YouTube worker exited before completing (exit_code=%s)', process.returncode)
+        raise SoundError('YouTube取得用の処理が途中で終了しました。時間をおいて再試行するか、音声ファイルを利用してください。')
     return output
 
 

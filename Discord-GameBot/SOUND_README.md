@@ -60,15 +60,15 @@ VCに参加し、そのVCのチャットで `./soundboard` または `/soundboar
 
 `/sound play`・サウンドボードと同じ接続・暗号化・音声再生処理を使用します。添付ファイルの音楽レーンでの再生中に `/play` で追加した曲は、その音声の終了後に流れます。サウンドボード・読み上げとは同時再生できます。取得中は、従来の自動退出タイマーは動作しません。
 
-更新した両方のrequirements.txtに `yt-dlp[default]==2026.10.26` と `deno==2.9.8` を追加しています。MWSでパッケージを再インストールしてから再起動してください。PCでは同じPython環境に `python -m pip install -r requirements.txt` で導入します。DenoはPythonパッケージに同梱された実行ファイルを直接指定するため、PATHへの手動追加は不要です。
+更新した両方のrequirements.txtに `yt-dlp[default]==2026.10.26` と `nodejs-wheel-binaries==24.19.0` を追加しています。MWSでパッケージを再インストールしてから再起動してください。PCでは同じPython環境に `python -m pip install -r requirements.txt` で導入します。Node.jsはPythonパッケージに同梱された実行ファイルを直接指定するため、PATHへの手動追加は不要です。
 
 音声取得は別プロセスで実行し、通常110秒で打ち切ります。タイムアウト・キャンセル時は子プロセスも終了させてから一時ファイルを削除します。音声取得・検索・プレイリスト取得はBot全体で共通の1件枠を使い、同時実行しません。音声取得は待機を含め120秒が上限です。音声ファイルの一時保存先は従来の再生処理が管理し、再生終了時に削除します。
 
-無料枠向けのメモリ対策として、取得用Denoに `DENO_V8_FLAGS=--max-old-space-size=128,--max-semi-space-size=4,--jitless` を渡します。これはV8のold-space・semi-space設定とJIT無効化であり、プロセス全体を128MiBに制限する設定ではありません。取得専用プロセスは軽量な共通モジュールを使い、Discord・VCのコードを読み込みません。JIT無効化は取得時のCPU処理時間が増える場合があります。Linuxで取得できるBotと子・孫プロセスのRSS概算合計を0.5秒ごとに調べ、300MiB以上ならYouTube取得を中止してそのプロセスグループを終了させます。開始前に既に300MiB以上なら取得を開始しません。重い動画では取得に失敗する可能性があります。RSSは共有ページを重複計上するためMWSの実際のメモリ計測と一致せず、急増や読み取り不能時の強制終了を完全には防げません。期限切れの候補ボタンではキューへ追加せず、初回応答時間をログに記録します。
+無料枠向けのメモリ対策として、取得用Node.js（requirements.txtのnodejs-wheel-binariesで導入、MWSの.packages内も検出）に `NODE_OPTIONS=--max-old-space-size=128 --max-semi-space-size=4 --jitless` を渡します。これはV8のold-space・semi-space設定とJIT無効化であり、プロセス全体を128MiBに制限する設定ではありません。取得専用プロセスは軽量な共通モジュールを使い、Discord・VCのコードを読み込みません。JIT無効化は取得時のCPU処理時間が増える場合があります。Linuxで取得できるBotと子・孫プロセスのRSS概算合計を0.5秒ごとに調べ、300MiB以上ならYouTube取得を中止してそのプロセスグループを終了させます。開始前に既に300MiB以上なら取得を開始しません。重い動画では取得に失敗する可能性があります。RSSは共有ページを重複計上するためMWSの実際のメモリ計測と一致せず、急増や読み取り不能時の強制終了を完全には防げません。期限切れの候補ボタンではキューへ追加せず、初回応答時間をログに記録します。
 
 入力URLから動画IDだけを取り出し、YouTubeの正規URLに変換します。任意サイトのURLやオプションをそのままダウンローダーやシェルに渡しません。FFmpegには取得済みのローカルファイルのみを渡します。取得プロセスへBotトークン・APIキー・共有シークレットの環境変数は渡さず、署名付きメディアURL・生のエラー本文をログに出しません。
 
-YouTube側の変更で取得が失敗する場合は、対応するyt-dlpの更新が必要になる場合があります。公式の依存関係・JavaScript実行環境の説明：https://github.com/yt-dlp/yt-dlp/wiki/EJS 。Deno同梱パッケージ：https://github.com/denoland/deno_pypi
+YouTube側の変更で取得が失敗する場合は、対応するyt-dlpの更新が必要になる場合があります。公式の依存関係・JavaScript実行環境の説明：https://github.com/yt-dlp/yt-dlp/wiki/EJS 。Node.js同梱パッケージ：https://github.com/njzjz/nodejs-wheel
 
 ## YouTube検索 `/search`
 
