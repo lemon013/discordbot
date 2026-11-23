@@ -114,7 +114,7 @@ class WorkerTests(unittest.TestCase):
             runtime_info=SimpleNamespace(path=youtube_worker.node_runtime(), version_tuple=(24, 19, 0)),
             ejs_setting=lambda key, default: default, logger=youtube_worker.QuietLogger(), _ARGS=['-'])
         runtime._clean_stderr = lambda value: NodeJCP._clean_stderr(runtime, value)
-        options = '--max-old-space-size=128 --max-semi-space-size=4 --jitless'
+        options = '--max-old-space-size=128 --max-semi-space-size=2'
         with patch.dict(os.environ, {'NODE_OPTIONS': options}):
             output = NodeJCP._run_js_runtime(runtime,
                 'console.log(JSON.stringify({rss:process.memoryUsage().rss, '

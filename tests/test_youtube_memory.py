@@ -71,5 +71,5 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         process = NS(communicate=AsyncMock(return_value=(b'ok', None)))
         with patch.object(yt, 'memory_mib', return_value=None), patch.object(yt.asyncio, 'create_subprocess_exec', new=AsyncMock(return_value=process)) as spawn:
             self.assertEqual(await yt.run_worker('url', 'path'), b'ok')
-        self.assertEqual(spawn.call_args.kwargs['env']['NODE_OPTIONS'], '--max-old-space-size=128 --max-semi-space-size=4 --jitless')
+        self.assertEqual(spawn.call_args.kwargs['env']['NODE_OPTIONS'], '--max-old-space-size=128 --max-semi-space-size=2')
         self.assertFalse(any(task.get_name() == 'youtube-memory-guard' and not task.done() for task in asyncio.all_tasks()))

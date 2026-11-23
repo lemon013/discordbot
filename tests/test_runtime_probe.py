@@ -11,6 +11,27 @@ import runtime_probe as mod
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
+    def test_thread_children_walk_skips_unrelated_host_processes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for pid, parent, children in [(2, 1, ''), (10, 2, '11'), (11, 10, '')]:
+                path = root / str(pid)
+                path.mkdir()
+                (path / 'status').write_text(f'PPid:\t{parent}\nVmRSS:\t1024 kB\n')
+                task = path / 'task' / str(pid)
+                task.mkdir(parents=True)
+                (task / 'children').write_text(children)
+            # Subprocesses spawned by a non-main thread must also be counted.
+            task = root / '2' / 'task' / '3'
+            task.mkdir()
+            (task / 'children').write_text('10')
+            original = Path.iterdir
+            def checked(path):
+                self.assertNotEqual(path, root, 'must not scan all host processes')
+                return original(path)
+            with patch.object(Path, 'iterdir', checked):
+                self.assertEqual(mod.process_memory(root, 2), (1, 3, 2))
+
     def test_proportional_memory_avoids_shared_page_double_count_and_falls_back_per_process(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

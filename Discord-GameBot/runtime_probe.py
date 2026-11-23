@@ -14,12 +14,32 @@ log = logging.getLogger(__name__)
 ACTIVE = None
 
 
+def process_directories(proc, pid):
+    """Walk children of every thread; avoid scanning unrelated host processes."""
+    pending, found = [pid], set()
+    try:
+        while pending:
+            current = pending.pop()
+            if current in found:
+                continue
+            found.add(current)
+            tasks = list((proc / str(current) / 'task').iterdir())
+            if not tasks:
+                raise OSError('Thread children unavailable')
+            for task in tasks:
+                pending.extend(int(value) for value in (task / 'children').read_text().split())
+        return [proc / str(current) for current in found]
+    except (OSError, ValueError):
+        # Restricted /proc mounts may not expose task children.
+        return list(proc.iterdir())
+
+
 def process_memory(proc=Path('/proc'), pid=None, *, proportional=False):
     """Use RSS by default; optionally use each process's PSS to apportion shared pages."""
     pid = os.getpid() if pid is None else pid
     rows = {}
     try:
-        directories = list(proc.iterdir())
+        directories = process_directories(proc, pid)
     except OSError:
         return None, None, None
     for directory in directories:

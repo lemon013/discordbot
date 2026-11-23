@@ -128,7 +128,7 @@ async def _run_worker(url, destination, playlist=False, search=False):
     environment['PYTHONPATH'] = os.pathsep.join(os.path.abspath(item or os.getcwd()) for item in sys.path)
     # Override inherited Node options: no preloads or unrelated Bot flags in the worker.
     # This bounds V8 old-space, not the complete Node/process RSS.
-    environment['NODE_OPTIONS'] = '--max-old-space-size=128 --max-semi-space-size=4 --jitless'
+    environment['NODE_OPTIONS'] = '--max-old-space-size=128 --max-semi-space-size=2'
     mode = ['search'] if search else ['playlist'] if playlist else []
     arguments = [sys.executable, '-u', str(worker), url, str(destination)] + mode
     process = await asyncio.create_subprocess_exec(*arguments,
@@ -153,6 +153,7 @@ async def _run_worker(url, destination, playlist=False, search=False):
         await kill_download(process)
         if isinstance(exc, asyncio.CancelledError):
             raise
+        log.warning('YouTube acquisition timed out (timeout_s=%s, memory_budget_mib=%s)', DOWNLOAD_TIMEOUT, WORKER_MEMORY_MIB)
         raise SoundError('YouTubeの音声取得がタイムアウトしました。短い動画でもう一度試してください。') from None
     finally:
         monitor.cancel()
