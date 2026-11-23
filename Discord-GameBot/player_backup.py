@@ -32,28 +32,38 @@ def paths():
     return {'levels.sqlite3': database_path('level'), 'casino.sqlite3': database_path('casino')}
 
 
-def pack():
+def pack_to(destination):
+    """Snapshot the pair consistently, then hash/compress files with bounded buffers."""
     targets = paths()
-    with tempfile.TemporaryDirectory() as temp, ExitStack() as stack:
-        # Same lock order as shop/party transactions.
-        for name in ('casino.sqlite3', 'levels.sqlite3'):
-            db = stack.enter_context(closing(sqlite3.connect(targets[name].as_uri() + '?mode=rw', uri=True, timeout=10)))
-            db.execute('BEGIN IMMEDIATE')
-        files = {}
-        for name, path in targets.items():
-            dest = Path(temp) / name
-            snapshot(path, dest)
-            files[name] = dest.read_bytes()
-    manifest = dict(version=1, sha256={n: hashlib.sha256(b).hexdigest() for n, b in files.items()})
-    out = io.BytesIO()
-    with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr('manifest.json', json.dumps(manifest))
-        for name, raw in files.items():
-            archive.writestr(name, raw)
-    raw = out.getvalue()
-    if len(raw) > MAX_UPLOAD:
+    with tempfile.TemporaryDirectory(dir=Path(destination).parent) as temp:
+        copies = {}
+        with ExitStack() as stack:
+            for name in ('casino.sqlite3', 'levels.sqlite3'):
+                db = stack.enter_context(closing(sqlite3.connect(
+                    targets[name].as_uri() + '?mode=rw', uri=True, timeout=10)))
+                db.execute('BEGIN IMMEDIATE')
+            for name, path in targets.items():
+                dest = Path(temp) / name
+                snapshot(path, dest)
+                copies[name] = dest
+        checksums = {}
+        for name, path in copies.items():
+            with path.open('rb') as handle:
+                checksums[name] = hashlib.file_digest(handle, 'sha256').hexdigest()
+        with zipfile.ZipFile(destination, 'w', zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('manifest.json', json.dumps(dict(version=1, sha256=checksums)))
+            for name, path in copies.items():
+                archive.write(path, name)
+    if Path(destination).stat().st_size > MAX_UPLOAD:
         raise RuntimeError('Player backup exceeds Discord upload limit; configure persistent storage.')
-    return raw
+
+
+def pack():
+    # Compatibility for tools/tests; the periodic upload uses pack_to directly.
+    with tempfile.TemporaryDirectory() as temp:
+        destination = Path(temp) / FILENAME
+        pack_to(destination)
+        return destination.read_bytes()
 
 
 def validate(raw):
@@ -222,20 +232,29 @@ class Transport:
             return bytes(data)
 
     async def upload(self, session, raw):
+        opened = []
         def form():
             data = aiohttp.FormData()
             data.add_field('payload_json', json.dumps({'content': PREFIX,
                 'allowed_mentions': {'parse': []}, 'attachments': [{'id': 0, 'filename': FILENAME}]}))
-            data.add_field('files[0]', raw, filename=FILENAME, content_type='application/zip')
+            payload = raw
+            if isinstance(raw, Path):
+                payload = raw.open('rb')
+                opened.append(payload)
+            data.add_field('files[0]', payload, filename=FILENAME, content_type='application/zip')
             return data
         route = f'/channels/{self.channel}/messages'
         method = 'POST'
         if self.message_id:
             route += f'/{self.message_id}'
             method = 'PATCH'
-        message = await self.request(session, method, route, data_factory=form)
-        self.message_id = message['id']
-        save_revision(revision(message))
+        try:
+            message = await self.request(session, method, route, data_factory=form)
+            self.message_id = message['id']
+            save_revision(revision(message))
+        finally:
+            for handle in opened:
+                handle.close()
 
 async def bootstrap():
     """Called before importing bot.py, which creates the database services."""
@@ -272,9 +291,16 @@ def register(bot):
             try:
                 if STATE is None:
                     raise RuntimeError('Cloud startup did not initialize Discord player backup')
-                raw = await asyncio.to_thread(pack)
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
-                    await STATE.upload(session, raw)
+                with tempfile.TemporaryDirectory(dir=paths()['levels.sqlite3'].parent) as temp:
+                    archive = Path(temp) / FILENAME
+                    worker = asyncio.create_task(asyncio.to_thread(pack_to, archive))
+                    try:
+                        await asyncio.shield(worker)
+                    except asyncio.CancelledError:
+                        await asyncio.gather(worker, return_exceptions=True)
+                        raise
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+                        await STATE.upload(session, archive)
                 log.info('Player data saved to Discord channel %s', STATE.channel)
             except Exception:
                 log.exception('PLAYER BACKUP FAILED: latest changes are only on local disk')

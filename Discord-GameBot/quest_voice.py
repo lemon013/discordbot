@@ -5,6 +5,8 @@ import math
 import os
 import re
 import time
+from pathlib import Path
+from audio_io import stream_audio
 
 import aiohttp
 
@@ -39,9 +41,11 @@ class QuestVoice:
             seconds = default
         self.next_request = max(self.next_request, time.monotonic() + max(3, seconds))
 
-    async def request(self, client, method, url, *, audio=False, **kwargs):
+    async def request(self, client, method, url, *, audio=False, destination=None, **kwargs):
         async with client.request(method, url, allow_redirects=False, **kwargs) as response:
             limit = MAX_BYTES if audio else 16384
+            if audio and destination is not None and response.status == 200:
+                return await stream_audio(response, destination, limit)
             data = bytearray()
             async for chunk in response.content.iter_chunked(65536):
                 data.extend(chunk)
@@ -62,19 +66,19 @@ class QuestVoice:
             except (ValueError, TypeError):
                 raise SoundError('外部音声APIの応答を読み取れませんでした。') from None
 
-    async def synthesize(self, text, voice):
+    async def synthesize(self, text, voice, destination=None):
         if voice not in VOICES:
             raise SoundError('この外部API構成で利用できる声を /voice change で選んでください。')
         if not isinstance(text, str) or not 1 <= len(text) <= 300:
             raise SoundError('読み上げる文章は1〜300文字で指定してください。')
         try:
-            return await asyncio.wait_for(self._synthesize(text, voice), 90)
+            return await asyncio.wait_for(self._synthesize(text, voice, destination), 90)
         except asyncio.TimeoutError:
             raise SoundError('外部音声APIの生成待ちがタイムアウトしました。混雑時は時間をおいてお試しください。') from None
         except aiohttp.ClientError:
             raise SoundError('外部音声APIへ接続できませんでした。ネットワーク・プロキシ設定を確認してください。') from None
 
-    async def _synthesize(self, text, voice):
+    async def _synthesize(self, text, voice, destination=None):
         async with self.lock:
             delay = self.next_request - time.monotonic()
             if delay > 30:
@@ -105,8 +109,15 @@ class QuestVoice:
                     if status.get('isAudioError'):
                         raise SoundError('外部音声APIで音声生成が失敗しました。')
                     if status.get('isAudioReady') is True:
-                        data = await self.request(client, 'GET', wav_url, audio=True)
-                        if len(data) < 44 or data[:4] != b'RIFF' or data[8:12] != b'WAVE':
+                        options = {'destination': destination} if destination is not None else {}
+                        data = await self.request(client, 'GET', wav_url, audio=True, **options)
+                        if destination is not None:
+                            with Path(destination).open('rb') as handle:
+                                header = handle.read(12)
+                            valid = Path(destination).stat().st_size >= 44 and header[:4] == b'RIFF' and header[8:12] == b'WAVE'
+                        else:
+                            valid = len(data) >= 44 and data[:4] == b'RIFF' and data[8:12] == b'WAVE'
+                        if not valid:
                             raise SoundError('外部音声APIから有効なWAVを取得できませんでした。')
                         return data
                     await asyncio.sleep(3)

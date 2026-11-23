@@ -153,6 +153,17 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(session.queue)
         self.assertIsNone(session.prefetch)
 
+    async def test_leave_releases_dashboard_session_after_final_update(self):
+        await self.music.enqueue(self.call(), URL_A)
+        await self.settle()
+        session = self.music.sessions[1]
+        await self.music.cancel_pending(1, self.channel.id)
+        if session.ui_task:
+            await session.ui_task
+        await self.settle()
+        self.assertNotIn(1, self.music.sessions)
+        self.assertIsNone(session.dashboard)
+
     async def test_prefetch_failure_keeps_current_song_and_fifo(self):
         self.prefetch_save.side_effect = SoundError('unavailable')
         await self.music.enqueue(self.call(), URL_A)

@@ -340,10 +340,23 @@ class Music:
         if session is None or session.channel.id != channel_id:
             return False
         had_work = self.has_work(guild_id)
-        task = session.task
+        pending = [task for task in [session.task, *session.fetches]
+                   if task and task is not asyncio.current_task()]
         self.clear(guild_id)
-        if task and task is not asyncio.current_task():
-            await asyncio.gather(task, return_exceptions=True)
+        generation = session.generation
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+        def release(_=None):
+            if (self.sessions.get(guild_id) is session and session.generation == generation
+                    and not self.has_work(guild_id)):
+                self.sessions.pop(guild_id, None)
+                session.dashboard = None
+        # Let the final dashboard update finish, then release its message/channel/guild.
+        if session.ui_task and not session.ui_task.done():
+            session.ui_task.add_done_callback(release)
+        else:
+            release()
         return had_work
 
     async def enqueue(self, interaction, url):

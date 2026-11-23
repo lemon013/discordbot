@@ -10,6 +10,10 @@ from pathlib import Path
 import re
 import sqlite3
 import time
+import tempfile
+import shutil
+from audio_io import stream_audio
+from audio_cache import disk_call
 from types import SimpleNamespace
 import unicodedata
 
@@ -61,12 +65,14 @@ class Providers:
         async with self.auth_lock:
             return await asyncio.to_thread(authorize)
 
-    async def request(self, method, url, **kwargs):
+    async def request(self, method, url, *, destination=None, **kwargs):
         async with self.slots:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as client:
                 async with client.request(method, url, allow_redirects=False, **kwargs) as response:
                     if response.status != 200:
                         raise SoundError('音声サービスへの接続・認証に失敗しました。管理者に設定の確認を依頼してください。')
+                    if destination is not None:
+                        return await stream_audio(response, destination, MAX_BYTES)
                     data = bytearray()
                     async for chunk in response.content.iter_chunked(65536):
                         data.extend(chunk)
@@ -97,9 +103,11 @@ class Providers:
         self.cache[provider] = time.monotonic(), voices
         return voices
 
-    async def synthesize(self, text, preference):
+    async def synthesize(self, text, preference, destination=None):
         provider, voice, speed = preference['provider'], preference['voice'], preference['speed']
         if provider == 'voicevox' and not self.base:
+            if destination is not None:
+                return await self.quest.synthesize(text, voice, destination=destination)
             return await self.quest.synthesize(text, voice)
         catalog = await self.voices(provider)
         if voice not in catalog:
@@ -108,7 +116,8 @@ class Providers:
             query = json.loads(await self.request('POST', self.base + '/audio_query',
                                                   params={'text': text, 'speaker': voice}))
             query['speedScale'] = speed
-            return await self.request('POST', self.base + '/synthesis', params={'speaker': voice}, json=query)
+            return await self.request('POST', self.base + '/synthesis', params={'speaker': voice}, json=query,
+                                      **({'destination': destination} if destination is not None else {}))
         data = json.loads(await self.request('POST', 'https://texttospeech.googleapis.com/v1/text:synthesize',
             headers=await self.headers(), json={'input': {'text': text},
                 'voice': {'languageCode': 'ja-JP', 'name': voice},
@@ -116,6 +125,9 @@ class Providers:
         audio = base64.b64decode(data['audioContent'], validate=True)
         if not 0 < len(audio) <= MAX_BYTES:
             raise SoundError('生成した音声のサイズが不正です。')
+        if destination is not None:
+            await disk_call(Path(destination).write_bytes, audio)
+            return len(audio)
         return audio
 
 
@@ -184,6 +196,8 @@ class Reading:
             await asyncio.gather(task, return_exceptions=True)
         self.hub.stop(guild_id)
         self.jobs.pop(guild_id, None)
+        self.configs.pop(guild_id, None)
+        self.cooldowns.pop(guild_id, None)
 
     async def start(self, interaction):
         channel = self.channel(interaction)
@@ -240,16 +254,19 @@ class Reading:
         if not (await asyncio.to_thread(self.store.personal, message.author.id))['reading_enabled']:
             return
         preference = self.preference(message.author.id)
-        data = await self.providers.synthesize(text, preference)
-        async def save(path):
-            await asyncio.to_thread(Path(path).write_bytes, data)
-        attachment = SimpleNamespace(filename='reading.wav', size=len(data), save=save,
-            tempo=preference['speed'] if not self.providers.base else 1.0)
-        state = getattr(message.author, 'voice', None)
-        if self.sessions.get(guild.id) != message.channel.id or not state or not state.channel or state.channel.id != message.channel.id:
-            return
-        context = SimpleNamespace(guild=guild, channel=message.channel, user=message.author)
-        event, key = await self.hub.play(context, message.channel, attachment, 'tts')
+        # Keep the WAV on disk rather than captured by a closure for its entire playback.
+        with tempfile.TemporaryDirectory(prefix='discord-reading-', dir=Path(__file__).resolve().parent) as folder:
+            path = Path(folder) / 'reading.wav'
+            await self.providers.synthesize(text, preference, destination=path)
+            async def save(destination):
+                await disk_call(shutil.copyfile, path, destination)
+            attachment = SimpleNamespace(filename='reading.wav', size=path.stat().st_size, save=save,
+                tempo=preference['speed'] if not self.providers.base else 1.0)
+            state = getattr(message.author, 'voice', None)
+            if self.sessions.get(guild.id) != message.channel.id or not state or not state.channel or state.channel.id != message.channel.id:
+                return
+            context = SimpleNamespace(guild=guild, channel=message.channel, user=message.author)
+            event, key = await self.hub.play(context, message.channel, attachment, 'tts')
         try:
             await asyncio.wait_for(event.wait(), 180)
         finally:

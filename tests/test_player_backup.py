@@ -40,6 +40,28 @@ class BackupTests(unittest.TestCase):
             db.execute("INSERT INTO shop_owned VALUES ('record')")
         self.raw = backup.pack()
 
+    def test_file_backup_avoids_loading_databases_and_preserves_full_archive(self):
+        destination = self.root / 'streamed.zip'
+        with patch.object(Path, 'read_bytes', side_effect=AssertionError('whole file read')):
+            backup.pack_to(destination)
+        self.assertEqual(backup.validate(destination.read_bytes()), backup.validate(self.raw))
+
+    def test_path_upload_reopens_stream_for_retry_and_closes_handles(self):
+        destination = self.root / 'upload.zip'
+        backup.pack_to(destination)
+        transport = backup.Transport('fake', bot_id='10', message_id='20')
+        streams = []
+        async def request(session, method, route, **kwargs):
+            for _ in range(2):
+                form = kwargs['data_factory']()
+                streams.append(form._fields[-1][2])
+                self.assertEqual(streams[-1].read(2), b'PK')
+            self.assertIsNot(streams[0], streams[1])
+            return dict(id='20', timestamp='old', edited_timestamp='new')
+        transport.request = request
+        run_inline(transport.upload(None, destination))
+        self.assertTrue(all(stream.closed for stream in streams))
+
     def test_restore_pair_after_entire_local_storage_removed(self):
         for path in list(self.root.iterdir()):
             path.unlink()

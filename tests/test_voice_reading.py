@@ -189,6 +189,38 @@ class ReadingTests(unittest.IsolatedAsyncioTestCase):
         await self.service.halt(1)
         self.assertNotIn(1, self.service.jobs)
         self.assertNotIn(1, self.service.sessions)
+    async def test_speech_file_is_released_before_waiting_for_playback_to_end(self):
+        self.service.sessions[1] = 10
+        paths = []
+        async def synthesize(text, preference, destination):
+            paths.append(destination)
+            destination.write_bytes(b'wav')
+            return 3
+        self.providers.synthesize.side_effect = synthesize
+        event, ready = asyncio.Event(), asyncio.Event()
+        async def play(context, channel, attachment, lane):
+            self.assertEqual(attachment.size, 3)
+            self.assertEqual(lane, 'tts')
+            ready.set()
+            return event, 'tts'
+        self.service.hub.play = AsyncMock(side_effect=play)
+        task = asyncio.create_task(self.service.speak(self.guild, self.message, 'Hello'))
+        await ready.wait()
+        await self.settle()
+        self.assertFalse(paths[0].exists())
+        self.assertFalse(task.done())
+        event.set()
+        await task
+
+    async def test_halt_releases_runtime_config_and_cooldown_without_erasing_settings(self):
+        self.store.put('guild', 1, {'music_volume': 25})
+        self.assertEqual(self.service.config(1)['music_volume'], 25)
+        self.service.cooldowns[1] = 100
+        await self.service.halt(1)
+        self.assertNotIn(1, self.service.configs)
+        self.assertNotIn(1, self.service.cooldowns)
+        self.assertEqual(self.service.config(1)['music_volume'], 25)
+
     async def test_change_and_volume_commands_save_and_show_credit(self):
         with patch('voice_reading.VoiceStore', return_value=self.store), patch('voice_reading.Providers', return_value=self.providers):
             service = register_voice(self.bot, self.sound)

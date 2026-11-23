@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import sys
 import time
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -31,6 +32,21 @@ class QuestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.kwargs['data'], {'text': 'hello private text', 'key': 'test-private-key'})
         self.assertEqual(calls[1].args[2], STATUS)
         self.assertEqual(calls[2].args[2], WAV_URL)
+
+    async def test_file_synthesis_validates_wav_header_without_loading_full_audio(self):
+        service = QuestVoice()
+        async def request(client, method, url, **kwargs):
+            if url == API: return RESULT
+            if url == STATUS: return {'isAudioReady': True}
+            self.assertTrue(kwargs['audio'])
+            Path(kwargs['destination']).write_bytes(WAV)
+            return len(WAV)
+        service.request = AsyncMock(side_effect=request)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'reading.wav'
+            result = await service.synthesize('hello', '3', destination=path)
+            self.assertEqual(result, len(WAV))
+            self.assertEqual(path.read_bytes(), WAV)
 
     def test_audio_urls_reject_arbitrary_hosts_ports_credentials_queries_and_mismatched_jobs(self):
         for status, audio in [
@@ -128,6 +144,34 @@ class Client:
 
 
 class HttpTests(unittest.IsolatedAsyncioTestCase):
+    async def test_streamed_audio_download_writes_file_and_bounds_size(self):
+        service = QuestVoice()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'reading.wav'
+            size = await service.request(Client(Reply(WAV)), 'GET', WAV_URL, audio=True, destination=path)
+            self.assertEqual(size, len(WAV))
+            self.assertEqual(path.read_bytes(), WAV)
+            with patch('quest_voice.MAX_BYTES', 10), self.assertRaises(SoundError):
+                await service.request(Client(Reply(WAV)), 'GET', WAV_URL, audio=True, destination=path)
+            self.assertFalse(path.exists())
+
+    async def test_cancelled_audio_download_removes_partial_file(self):
+        service = QuestVoice()
+        started = asyncio.Event()
+        class BlockingReply(Reply):
+            async def iter_chunked(self, count):
+                yield b'partial'
+                started.set()
+                await asyncio.Event().wait()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'reading.wav'
+            task = asyncio.create_task(service.request(Client(BlockingReply(b'')), 'GET', WAV_URL,
+                                                       audio=True, destination=path))
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError): await task
+            self.assertFalse(path.exists())
+
     async def test_chunked_response_redirects_and_errors_are_handled_without_raw_bodies(self):
         service = QuestVoice()
         client = Client(Reply(json.dumps({'ok': True}).encode()))

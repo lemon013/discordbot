@@ -133,7 +133,7 @@ STATUS_MESSAGES = (
     '🥇ボドゲで目指せ優勝！',
     '🎁/giftで贈り物を送れる！',
 )
-bot = commands.Bot(command_prefix='!', intents=intents,
+bot = commands.Bot(command_prefix='!', intents=intents, max_messages=100,
                    activity=discord.CustomActivity(name=STATUS_MESSAGES[0]))
 from presence_rotation import PresenceRotation
 status_rotation = PresenceRotation(bot, STATUS_MESSAGES)

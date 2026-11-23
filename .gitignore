@@ -23,3 +23,4 @@ discord-player-backup.tmp
 
 # Temporary downloaded audio cache (never commit media)
 discord-music-cache-*/
+discord-reading-*/
