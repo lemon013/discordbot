@@ -166,6 +166,9 @@ async def _run_worker(url, destination, playlist=False, search=False):
     return output
 
 
+from audio_cache import AUDIO_CACHE, disk_call
+
+
 class YouTubeAudio:
     download_timeout = 120
 
@@ -176,6 +179,10 @@ class YouTubeAudio:
 
     async def save(self, destination):
         async with self.slots:
+            cached = await disk_call(AUDIO_CACHE.copy, self.url, destination)
+            if cached is not None:
+                self.filename, self.size = cached
+                return
             output = await run_worker(self.url, destination)
             try:
                 if len(output) > 8192:
@@ -190,6 +197,7 @@ class YouTubeAudio:
                 title = str(data.get('title') or 'YouTube音声')
                 title = ''.join(c for c in title if ord(c) >= 32).replace('@', '＠')[:90]
                 self.filename = title + '.webm'
+                await disk_call(AUDIO_CACHE.put, self.url, destination, self.filename)
             except (ValueError, KeyError, TypeError, AttributeError, OSError):
                 raise SoundError(ERRORS['unavailable']) from None
 

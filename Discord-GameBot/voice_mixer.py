@@ -12,6 +12,9 @@ import discord
 from sound import UploadedAudio, SoundError, MAX_BYTES, ffmpeg_executable, verify_audio, wait_for_voice_encryption
 
 
+SILENCE = bytes(3840)
+
+
 class Mixer(discord.AudioSource):
     def __init__(self, settings):
         self.settings = settings
@@ -42,7 +45,9 @@ class Mixer(discord.AudioSource):
         with self.lock:
             if self.closed:
                 return b''
-            mixed = [0.0] * 1920  # 20 ms, stereo, 48 kHz, signed 16-bit PCM
+            if not self.sources or (self.paused and set(self.sources) == {'music'}):
+                return SILENCE
+            frames = []
             config = self.settings()
             duck = config['duck'] and 'tts' in self.sources
             for key, source in list(self.sources.items()):
@@ -63,7 +68,15 @@ class Mixer(discord.AudioSource):
                 gain = config[lane + '_volume'] / 100
                 if key == 'music' and duck:
                     gain *= config['duck_volume'] / 100
-                samples = array('h', data[:3840])
+                if gain:
+                    frames.append((data[:3840], gain))
+            if not frames:
+                return SILENCE
+            if len(frames) == 1 and frames[0][1] == 1 and len(frames[0][0]) == 3840:
+                return frames[0][0]
+            mixed = [0.0] * 1920
+            for data, gain in frames:
+                samples = array('h', data)
                 if sys.byteorder != 'little':
                     samples.byteswap()
                 for index, value in enumerate(samples):
@@ -206,9 +219,9 @@ class VoiceHub:
             tempo = float(getattr(attachment, 'tempo', 1.0))
             if not 0.5 <= tempo <= 2.0:
                 raise SoundError('読み上げ速度は0.5〜2.0倍で指定してください。')
-            options = '-vn -map 0:a:0' + (f' -af atempo={tempo:g}' if tempo != 1.0 else '')
+            options = '-vn -map 0:a:0 -threads 1' + (f' -af atempo={tempo:g}' if tempo != 1.0 else '')
             inner = discord.FFmpegPCMAudio(str(path), executable=executable,
-                before_options='-nostdin -protocol_whitelist file,pipe', options=options, stderr=error_output)
+                before_options='-nostdin -threads 1 -filter_threads 1 -protocol_whitelist file,pipe', options=options, stderr=error_output)
             source = UploadedAudio(inner, directory, finished, stderr=error_output)
             source.ticket_award = getattr(attachment, 'ticket_award', None)
             source.guild_id, source.title = guild.id, attachment.filename

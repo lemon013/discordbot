@@ -22,6 +22,9 @@ PLAYLIST = 'https://www.youtube.com/playlist?list=PL123456789012345'
 
 class QueueTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        replacement = patch('music_queue.YouTubeAudio.save', new_callable=AsyncMock)
+        self.prefetch_save = replacement.start()
+        self.addCleanup(replacement.stop)
         self.sound = Sound(SimpleNamespace())
         self.music = Music(SimpleNamespace(), self.sound)
         self.channel = Mock(spec=discord.VoiceChannel)
@@ -126,6 +129,41 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.music.sessions)
         self.sound.play.assert_not_awaited()
         self.assertIn('Botが参加', interaction.edit_original_response.call_args.kwargs['content'])
+
+    async def test_prefetch_prepares_only_next_track_and_clear_cancels_it(self):
+        entered, cancelled = asyncio.Event(), asyncio.Event()
+        async def blocked(destination):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+        self.prefetch_save.side_effect = blocked
+        await self.music.enqueue(self.call(), URL_A)
+        await self.settle()
+        self.prefetch_save.assert_not_awaited()
+        await self.music.enqueue(self.call(), URL_B)
+        await entered.wait()
+        await self.music.enqueue(self.call(), URL_C)
+        session = self.music.sessions[1]
+        self.assertEqual(session.prefetch_url, URL_B)
+        self.assertEqual(self.prefetch_save.await_count, 1)
+        self.music.clear(1)
+        await cancelled.wait()
+        self.assertFalse(session.queue)
+        self.assertIsNone(session.prefetch)
+
+    async def test_prefetch_failure_keeps_current_song_and_fifo(self):
+        self.prefetch_save.side_effect = SoundError('unavailable')
+        await self.music.enqueue(self.call(), URL_A)
+        await self.settle()
+        source = self.music.sessions[1].source
+        await self.music.enqueue(self.call(), URL_B)
+        await self.settle()
+        session = self.music.sessions[1]
+        self.assertIs(session.source, source)
+        self.assertEqual([t.url for t in session.queue], [URL_B])
+        self.assertEqual(self.sound.play.await_count, 1)
 
     async def cleanup(self):
         for session in self.music.sessions.values():

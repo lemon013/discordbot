@@ -70,7 +70,7 @@ def ffmpeg_executable():
 async def verify_audio(executable, path):
     """Check an audio stream before joining; never pass a user URL to FFmpeg."""
     process = await asyncio.create_subprocess_exec(
-        executable, '-nostdin', '-v', 'error', '-protocol_whitelist', 'file,pipe',
+        executable, '-nostdin', '-threads', '1', '-filter_threads', '1', '-v', 'error', '-protocol_whitelist', 'file,pipe',
         '-i', str(path), '-map', '0:a:0', '-t', '0.1', '-f', 'null', '-',
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
@@ -334,8 +334,8 @@ class Sound:
             error_output = open(os.devnull, 'wb')
             inner = discord.FFmpegOpusAudio(
                 str(path), executable=executable, bitrate=128,
-                before_options='-nostdin -protocol_whitelist file,pipe',
-                options='-vn -map 0:a:0 -frame_duration 20 -application audio', stderr=error_output)
+                before_options='-nostdin -threads 1 -filter_threads 1 -protocol_whitelist file,pipe',
+                options='-vn -map 0:a:0 -threads 1 -frame_duration 20 -application audio', stderr=error_output)
             source = UploadedAudio(inner, directory, cleanup_complete, stderr=error_output)
             source.ticket_award = getattr(attachment, 'ticket_award', None)
             source.guild_id = guild.id

@@ -34,6 +34,24 @@ class MixTests(unittest.TestCase):
         self.mixer = Mixer(lambda: self.config)
     def sample(self):
         return array('h', self.mixer.read())[0]
+    def test_idle_and_paused_music_return_shared_silence_without_reading(self):
+        from voice_mixer import SILENCE
+        self.assertIs(self.mixer.read(), SILENCE)
+        music = Tone(1000)
+        self.mixer.add('music', music)
+        self.mixer.paused = True
+        self.assertIs(self.mixer.read(), SILENCE)
+        self.assertEqual(music.frames, 10)
+
+    def test_unity_single_lane_returns_original_pcm_and_mute_still_consumes(self):
+        frame = array('h', [1234] * 1920).tobytes()
+        source = Mock(read=Mock(return_value=frame))
+        self.mixer.add('music', source)
+        self.assertIs(self.mixer.read(), frame)
+        self.config['music_volume'] = 0
+        self.assertEqual(self.mixer.read(), bytes(3840))
+        self.assertEqual(source.read.call_count, 2)
+
     def test_three_lanes_mix_and_clip_instead_of_wrapping(self):
         for key in ('music', 'tts', 'board:1'):
             self.mixer.add(key, Tone(20000))

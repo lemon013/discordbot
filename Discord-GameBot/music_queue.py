@@ -4,6 +4,8 @@ from collections import deque
 from dataclasses import dataclass, field
 import logging
 import time
+import tempfile
+from pathlib import Path
 import uuid
 from types import SimpleNamespace
 
@@ -50,6 +52,8 @@ class Session:
     error: str = ''
     skipping: bool = False
     loop_mode: str = 'off'
+    prefetch: object = None
+    prefetch_url: str = ''
 
 
 class PlaybackContext:
@@ -218,6 +222,35 @@ class Music:
             self.sound.cancel_idle(session.guild.id)
             self.sound.idle_tasks[session.guild.id] = asyncio.create_task(self.sound.idle_disconnect(session.guild))
 
+    def prepare_next(self, session):
+        # Only one upcoming track per guild; all workers still share the global gate.
+        target = (session.current if session.loop_mode == 'track' else
+                  session.queue[0] if session.queue else None)
+        url = target.url if target is not None and session.source is not None else ''
+        if url == session.prefetch_url:
+            return
+        if session.prefetch and not session.prefetch.done():
+            session.prefetch.cancel()
+        session.prefetch_url = url
+        session.prefetch = None
+        if not url:
+            return
+
+        async def prepare():
+            try:
+                with tempfile.TemporaryDirectory(prefix='discord-music-next-') as directory:
+                    await YouTubeAudio(url, self.slots).save(Path(directory) / 'audio.webm')
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # A speculative failure must not interrupt the currently playing song.
+                log.info('Next music preparation unavailable (error_type=%s)', type(exc).__name__)
+
+        task = asyncio.create_task(prepare(), name='music-prefetch')
+        session.prefetch = task
+        session.fetches.add(task)
+        task.add_done_callback(session.fetches.discard)
+
     def kick(self, session):
         if (self.sessions.get(session.guild.id) is not session or session.current is not None or not session.queue
                 or (session.task and not session.task.done()) or session.guild.id in self.sound.playing):
@@ -255,6 +288,7 @@ class Music:
                         continue
                     session.current.title = audio.filename.removesuffix('.webm')
                     session.source = self.sound.playing.get(session.guild.id)
+                    self.prepare_next(session)
                     self.refresh(session)
                     return
         except asyncio.CancelledError:
@@ -290,6 +324,8 @@ class Music:
         if session is None:
             return
         session.generation += 1
+        session.prefetch_url = ''
+        session.prefetch = None
         session.queue.clear()
         session.loop_mode = 'off'
         session.current, session.source, session.skipping = None, None, False
@@ -354,6 +390,7 @@ class Music:
             session.queue.extend(Track(item['url'], item['title'], interaction.user.id) for item in accepted)
             self.sound.cancel_idle(session.guild.id)
             self.kick(session)
+            self.prepare_next(session)
             self.refresh(session)
             answer = f'✅ {len(accepted)}曲を順番に追加しました。ダッシュボードで確認できます。'
             if limited or len(accepted) < len(entries):
@@ -412,6 +449,7 @@ class Music:
                         raise SoundError('Botが参加しているVCで操作してください。')
                     mode = 'track' if action == 'loop_track' else 'queue'
                     session.loop_mode = 'off' if session.loop_mode == mode else mode
+                    self.prepare_next(session)
                     answer = {'off': 'ループ再生をOFFにしました。',
                               'track': '🔂 曲ループをONにしました。同じ曲を繰り返します。',
                               'queue': '🔁 全曲ループをONにしました。現在の曲とキューを順番に繰り返します。'}[session.loop_mode]

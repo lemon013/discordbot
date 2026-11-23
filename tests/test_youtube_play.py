@@ -40,6 +40,14 @@ class UrlTests(unittest.TestCase):
 
 
 class DownloadTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from audio_cache import AudioCache
+        cache = AudioCache()
+        replacement = patch('youtube_play.AUDIO_CACHE', cache)
+        replacement.start()
+        self.addCleanup(replacement.stop)
+        self.addCleanup(cache.close)
+
     async def test_slash_registration_and_shared_sound_service(self):
         bot = commands.Bot(command_prefix='!', intents=discord.Intents.none())
         sound = SimpleNamespace(invoke=AsyncMock())

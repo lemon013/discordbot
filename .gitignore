@@ -20,3 +20,6 @@ Discord-GameBot/ai_settings.tmp
 *.download
 discord-player-backup.json
 discord-player-backup.tmp
+
+# Temporary downloaded audio cache (never commit media)
+discord-music-cache-*/
