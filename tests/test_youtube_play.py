@@ -108,6 +108,22 @@ class DownloadTests(unittest.IsolatedAsyncioTestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_worker_import_does_not_load_discord_or_voice_stack(self):
+        code = ('import youtube_worker, sys; '
+                'assert not ({"discord", "sound", "music_queue", "youtube_play"} & sys.modules.keys())')
+        result = subprocess.run([sys.executable, '-c', code],
+            cwd=Path(__file__).resolve().parents[1] / 'Discord-GameBot',
+            capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_two_and_a_half_minute_track_remains_supported(self):
+        info = {'duration': 150, 'title': '150 seconds', 'extractor_key': 'Youtube'}
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'audio.webm'
+            with patch('yt_dlp.YoutubeDL', self.fake_downloader(info, path)):
+                self.assertEqual(youtube_worker.download(URL, path), {'ok': True, 'title': '150 seconds'})
+            self.assertEqual(path.read_bytes(), b'audio')
+
     def test_real_downloader_accepts_options_with_the_bundled_js_runtime(self):
         import yt_dlp
         with tempfile.TemporaryDirectory() as folder:

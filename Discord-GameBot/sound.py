@@ -16,16 +16,12 @@ from importlib.metadata import version, PackageNotFoundError
 
 import discord
 from discord import app_commands
+from sound_common import MAX_BYTES, SoundError
 
 log = logging.getLogger(__name__)
-MAX_BYTES = 25 * 1024 * 1024
 CONNECT_TIMEOUT = 20
 DAVE_READY_TIMEOUT = 10
 EXTENSIONS = {'.mp3', '.wav', '.ogg', '.opus', '.m4a', '.aac', '.flac', '.webm', '.mp4'}
-
-
-class SoundError(Exception):
-    pass
 
 
 def make_test_tone():

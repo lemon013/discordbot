@@ -5,7 +5,7 @@ from itertools import islice
 from pathlib import Path
 import sys
 
-from youtube_play import normalize_url, normalize_playlist, normalize_search, MAX_BYTES, MAX_DURATION, MAX_QUEUE, SEARCH_LIMIT
+from youtube_rules import normalize_url, normalize_playlist, normalize_search, MAX_BYTES, MAX_DURATION, MAX_QUEUE, SEARCH_LIMIT
 
 
 class QuietLogger:

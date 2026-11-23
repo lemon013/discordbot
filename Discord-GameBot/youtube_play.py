@@ -4,21 +4,17 @@ import json
 import logging
 import os
 from pathlib import Path
-import re
 import signal
 import subprocess
 import sys
 import weakref
-from urllib.parse import parse_qs, urlsplit
 
 import discord
 from discord import app_commands
-from sound import MAX_BYTES, SoundError
+from youtube_rules import (MAX_BYTES, SoundError, MAX_DURATION, MAX_QUEUE, SEARCH_LIMIT,
+                           normalize_url, normalize_playlist, normalize_search)
 
-MAX_DURATION = 30 * 60
 DOWNLOAD_TIMEOUT = 110
-MAX_QUEUE = 50
-SEARCH_LIMIT = 7
 WORKER_MEMORY_MIB = 300
 _worker_gates = weakref.WeakKeyDictionary()
 log = logging.getLogger(__name__)
@@ -29,42 +25,6 @@ ERRORS = {
     'size': '動画の音声が25MBの上限を超えています。短い動画を指定してください。',
     'unavailable': 'YouTubeの音声を取得できませんでした。公開動画のURLを確認してください。YouTube側のBot判定・地域・年齢・ログイン制限で取得できない場合もあります。',
 }
-
-
-def normalize_url(value):
-    value = value.strip()
-    if value.startswith('<') and value.endswith('>'):
-        value = value[1:-1]
-    if len(value) > 2048:
-        raise SoundError('YouTube動画のURLを指定してください。')
-    try:
-        url = urlsplit(value)
-        host = (url.hostname or '').lower()
-        if host.startswith('music.amazon.') or host in ('amzn.to', 'a.co'):
-            raise SoundError('Amazon Musicの直接再生には現在対応していません。/search でYouTubeを検索するか、/sound play で音声ファイルを添付してください。')
-        if url.scheme != 'https' or url.username or url.password or url.port:
-            raise ValueError()
-        parts = url.path.strip('/').split('/')
-        if host in ('youtu.be', 'www.youtu.be') and len(parts) == 1:
-            video_id = parts[0]
-        elif host in ('youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'):
-            if url.path == '/watch':
-                ids = parse_qs(url.query).get('v', [])
-                if len(ids) != 1:
-                    raise ValueError()
-                video_id = ids[0]
-            elif len(parts) == 2 and parts[0] in ('shorts', 'embed', 'live'):
-                video_id = parts[1]
-            else:
-                raise ValueError()
-        else:
-            raise ValueError()
-        if not re.fullmatch(r'[A-Za-z0-9_-]{11}', video_id):
-            raise ValueError()
-        # Never follow arbitrary input hosts, playlist links or user query options.
-        return 'https://www.youtube.com/watch?v=' + video_id
-    except ValueError:
-        raise SoundError('https://www.youtube.com/watch?v=... または https://youtu.be/... の動画URLを指定してください。') from None
 
 
 async def kill_download(process):
@@ -91,25 +51,6 @@ async def kill_download(process):
     await process.wait()
 
 
-def normalize_playlist(value):
-    value = value.strip().removeprefix('<').removesuffix('>')
-    try:
-        if len(value) > 2048:
-            raise ValueError()
-        url = urlsplit(value)
-        ids = parse_qs(url.query).get('list', [])
-        if not ids:
-            return None
-        if (url.scheme != 'https' or url.username is not None or url.password is not None or url.port
-                or (url.hostname or '').lower() not in ('youtube.com', 'www.youtube.com', 'm.youtube.com',
-                    'music.youtube.com', 'youtu.be', 'www.youtu.be')
-                or len(ids) != 1 or not re.fullmatch(r'[A-Za-z0-9_-]{10,100}', ids[0])):
-            raise ValueError()
-        return 'https://www.youtube.com/playlist?list=' + ids[0]
-    except ValueError:
-        raise SoundError('公開されているYouTubeプレイリストのURLを指定してください。') from None
-
-
 async def load_playlist(url, slots):
     canonical = normalize_playlist(url)
     if canonical is None:
@@ -129,13 +70,6 @@ async def load_playlist(url, slots):
         return tracks, bool(data.get('limited'))
     except (ValueError, KeyError, TypeError, AttributeError):
         raise SoundError('プレイリストから再生可能な動画を取得できませんでした。') from None
-
-
-def normalize_search(query):
-    query = ' '.join(query.split())
-    if not query or len(query) > 200 or any(ord(char) < 32 for char in query):
-        raise SoundError('検索ワードを1〜200文字で入力してください。空白を含むキーワードも使えます。')
-    return query
 
 
 async def search_youtube(query, slots):
@@ -193,7 +127,7 @@ async def _run_worker(url, destination, playlist=False, search=False):
     # MWS can add its .packages directory to sys.path at launch time.
     environment['PYTHONPATH'] = os.pathsep.join(os.path.abspath(item or os.getcwd()) for item in sys.path)
     # This bounds V8 old-space, not the complete Deno/process RSS.
-    environment['DENO_V8_FLAGS'] = '--max-old-space-size=64,--max-semi-space-size=4'
+    environment['DENO_V8_FLAGS'] = '--max-old-space-size=128,--max-semi-space-size=4,--jitless'
     mode = ['search'] if search else ['playlist'] if playlist else []
     arguments = [sys.executable, '-u', str(worker), url, str(destination)] + mode
     process = await asyncio.create_subprocess_exec(*arguments,
@@ -223,7 +157,7 @@ async def _run_worker(url, destination, playlist=False, search=False):
         monitor.cancel()
         await asyncio.gather(monitor, return_exceptions=True)
     if exceeded:
-        raise SoundError('Botの停止を避けるため、メモリ使用量が増えたYouTube取得処理を中止しました。短い動画や音声ファイルを利用してください。')
+        raise SoundError('Botの停止を避けるため、メモリ使用量が増えたYouTube取得処理を中止しました。時間をおいて再試行するか、音声ファイルを利用してください。')
     return output
 
 
