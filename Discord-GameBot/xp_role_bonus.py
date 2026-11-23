@@ -16,6 +16,11 @@ def member_roles(member):
     return [role.id for role in roles] if isinstance(roles, (list, tuple)) else None
 
 
+def matching_roles(rules, roles):
+    owned = set(roles)
+    return [(role, percent) for role, percent in rules if role in owned]
+
+
 class BonusStore:
     def __init__(self, path):
         self.path = path
@@ -46,6 +51,9 @@ class BonusStore:
         with closing(sqlite3.connect(self.path)) as db:
             return db.execute('SELECT role_id,percent FROM xp_bonus_roles WHERE guild_id=? ORDER BY percent DESC,role_id', (guild_id,)).fetchall()
 
+    def for_roles(self, guild_id, roles):
+        return matching_roles(self.list(guild_id), roles)
+
     @staticmethod
     def remember_in(db, guild_id, user_id, roles):
         if roles is not None:
@@ -65,7 +73,7 @@ def apply_bonus(db, alias, guild_id, user_id, amount):
         return amount
     row = db.execute(f'SELECT roles FROM {alias}.xp_bonus_members WHERE guild_id=? AND user_id=?', (guild_id, user_id)).fetchone()
     roles = set(json.loads(row[0])) if row else set()
-    percent = max((percent for role, percent in rules if role in roles), default=0)
+    percent = sum(percent for _, percent in matching_roles(rules, roles))
     if not percent:
         return amount
     row = db.execute(f'SELECT remainder FROM {alias}.xp_bonus_carry WHERE guild_id=? AND user_id=?', (guild_id, user_id)).fetchone()
@@ -136,7 +144,7 @@ def register_xp_bonus(bot, leveling):
         page = min(page, pages)
         lines = [f'<@&{role}>：**＋{percent}％**（{100 + percent}％獲得）' for role, percent in rows[(page - 1) * 10:page * 10]]
         embed = discord.Embed(title='ロールXPボーナス一覧', description='\n'.join(lines) or '設定されているロールはありません。', color=discord.Color.blue())
-        embed.set_footer(text=f'{page}/{pages}ページ｜複数所持時は最大の加算率のみ適用。小数分は繰り越し。')
+        embed.set_footer(text=f'{page}/{pages}ページ｜複数所持時は加算率を合計。小数分は繰り越し。')
         await interaction.edit_original_response(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     async def on_member_update(before, after):
@@ -145,3 +153,48 @@ def register_xp_bonus(bot, leveling):
 
     bot.add_listener(on_member_update, 'on_member_update')
     bot.tree.add_command(group)
+
+
+class RankBonusView(discord.ui.View):
+    """Paginate the target member's role snapshot without additional API/DB polling."""
+    def __init__(self, owner, base_embed, roles):
+        super().__init__(timeout=180)
+        self.owner, self.base_embed, self.roles = owner, base_embed, roles
+        self.page, self.message = 0, None
+
+    def embed(self):
+        embed = self.base_embed.copy()
+        total = sum(percent for _, percent in self.roles)
+        embed.add_field(name='獲得XPボーナス合計', value=f'**＋{total}％**（通常の{100 + total}％獲得）', inline=False)
+        lines = [f'<@&{role}>：＋{percent}％' for role, percent in self.roles[self.page * 10:(self.page + 1) * 10]]
+        pages = max(1, (len(self.roles) + 9) // 10)
+        embed.add_field(name=f'加算対象ロール（{self.page + 1}/{pages}ページ）',
+            value='\n'.join(lines) or '対象ロールはありません。', inline=False)
+        self.previous.disabled = self.page == 0
+        self.next.disabled = self.page + 1 >= pages
+        return embed
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id == self.owner:
+            return True
+        await interaction.response.send_message('自分で /rank を実行して操作してください。', ephemeral=True)
+        return False
+
+    @discord.ui.button(label='前のロール', style=discord.ButtonStyle.secondary)
+    async def previous(self, interaction, button):
+        self.page = max(0, self.page - 1)
+        await interaction.response.edit_message(embed=self.embed(), view=self, allowed_mentions=discord.AllowedMentions.none())
+
+    @discord.ui.button(label='次のロール', style=discord.ButtonStyle.secondary)
+    async def next(self, interaction, button):
+        self.page = min(max(0, (len(self.roles) - 1) // 10), self.page + 1)
+        await interaction.response.edit_message(embed=self.embed(), view=self, allowed_mentions=discord.AllowedMentions.none())
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass

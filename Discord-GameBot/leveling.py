@@ -394,7 +394,11 @@ class Leveling:
         adjustment = user['xp'] - user['text_xp'] - user['voice_xp'] - user['shop_xp']
         if adjustment:
             embed.add_field(name='管理者によるXP調整', value=f'{adjustment:+,} XP', inline=False)
-        await interaction.edit_original_response(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        from xp_role_bonus import RankBonusView
+        roles = await asyncio.to_thread(self.store.bonuses.for_roles, interaction.guild_id, member_roles(member) or [])
+        view = RankBonusView(interaction.user.id, embed, roles)
+        view.message = await interaction.edit_original_response(embed=view.embed(), view=view if len(roles) > 10 else None,
+            allowed_mentions=discord.AllowedMentions.none())
 
     async def leaderboard(self, interaction, page):
         await interaction.response.defer(thinking=True)

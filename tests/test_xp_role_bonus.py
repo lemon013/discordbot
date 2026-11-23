@@ -11,7 +11,7 @@ from discord.ext import commands
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'Discord-GameBot'))
 from leveling import LevelStore, Leveling
-from xp_role_bonus import BonusStore, register_xp_bonus
+from xp_role_bonus import BonusStore, RankBonusView, register_xp_bonus
 from casino import CasinoStore, CasinoError, MAX_BALANCE
 from solo_rewards import SoloRewards
 from party_rewards import PartyRewards
@@ -36,17 +36,60 @@ class BonusTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bonus.list(1), [(11, 25)])
         self.assertEqual(self.bonus.list(2), [])
 
-    async def test_highest_role_only_and_removal_no_stale_multiplier(self):
+    async def test_five_and_ten_percent_are_fifteen_not_compounded(self):
+        self.bonus.set(1, 11, 5)
+        self.bonus.set(1, 12, 10)
+        self.levels.configure(1, dict(text_xp_min=100, text_xp_max=100))
+        result, _ = self.levels.award_text(1, 10, now=100, roles=[11, 12, 11, 999])
+        self.assertEqual(result['xp'], 115)
+        self.assertEqual(SoloRewards(self.casino, self.levels).grant(1, 10, 'stacked:solo', 100)['xp'], 115)
+
+    async def test_rank_shows_target_members_roles_and_combined_percentage(self):
+        self.bonus.set(1, 11, 5)
+        self.bonus.set(1, 12, 10)
+        service = Leveling(self.bot, self.levels)
+        interaction = NS(user=NS(id=99, roles=[NS(id=999)]), guild_id=1,
+            response=NS(defer=AsyncMock()), edit_original_response=AsyncMock())
+        member = NS(id=10, display_name='Target', roles=[NS(id=11), NS(id=12)])
+        await service.rank(interaction, member)
+        embed = interaction.edit_original_response.call_args.kwargs['embed']
+        self.assertIn('Target', embed.title)
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertIn('＋15％', fields['獲得XPボーナス合計'])
+        self.assertIn('115％', fields['獲得XPボーナス合計'])
+        self.assertIn('<@&11>：＋5％', fields['加算対象ロール（1/1ページ）'])
+        self.assertIn('<@&12>：＋10％', fields['加算対象ロール（1/1ページ）'])
+        member.roles = []
+        await service.rank(interaction, member)
+        fields = interaction.edit_original_response.call_args.kwargs['embed'].fields
+        self.assertIn('＋0％', fields[-2].value)
+        self.assertIn('ありません', fields[-1].value)
+
+    async def test_rank_bonus_pages_keep_total_and_reject_other_operators(self):
+        roles = [(i, 5) for i in range(35)]
+        view = RankBonusView(99, discord.Embed(title='rank'), roles)
+        self.assertIn('＋175％', view.embed().fields[-2].value)
+        interaction = NS(user=NS(id=99), response=NS(edit_message=AsyncMock(), send_message=AsyncMock()))
+        await view.next.callback(interaction)
+        embed = interaction.response.edit_message.call_args.kwargs['embed']
+        self.assertIn('2/4', embed.fields[-1].name)
+        self.assertIn('<@&10>', embed.fields[-1].value)
+        self.assertIn('＋175％', embed.fields[-2].value)
+        interaction.user.id = 100
+        self.assertFalse(await view.interaction_check(interaction))
+        view.stop()
+
+    async def test_role_percentages_stack_additively_and_removal_is_immediate(self):
         self.levels.configure(1, dict(text_xp_min=100, text_xp_max=100))
         self.bonus.set(1, 11, 25)
         self.bonus.set(1, 12, 50)
         result, _ = self.levels.award_text(1, 10, now=100)
-        self.assertEqual(result['xp'], 150)
+        self.assertEqual(result['xp'], 175)
         self.bonus.remove(1, 12)
         result, _ = self.levels.award_text(1, 10, now=200)
-        self.assertEqual(result['xp'], 275)
+        self.assertEqual(result['xp'], 300)
         result, _ = self.levels.award_text(1, 10, now=300, roles=[])
-        self.assertEqual(result['xp'], 375)
+        self.assertEqual(result['xp'], 400)
 
     async def test_small_fraction_survives_restart_and_replay_does_not_add_twice(self):
         self.bonus.set(1, 11, 5)
