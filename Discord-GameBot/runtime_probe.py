@@ -14,8 +14,8 @@ log = logging.getLogger(__name__)
 ACTIVE = None
 
 
-def process_memory(proc=Path('/proc'), pid=None):
-    """RSS sum is approximate (shared pages can be counted more than once)."""
+def process_memory(proc=Path('/proc'), pid=None, *, proportional=False):
+    """Use RSS by default; optionally use each process's PSS to apportion shared pages."""
     pid = os.getpid() if pid is None else pid
     rows = {}
     try:
@@ -38,7 +38,19 @@ def process_memory(proc=Path('/proc'), pid=None):
         descendants.update(found)
     if pid not in rows:
         return None, None, None
-    return rows[pid][1], sum(rows[p][1] for p in descendants if p in rows), len(descendants) - 1
+    sizes = {p: rows[p][1] for p in descendants if p in rows}
+    if proportional:
+        for process_id in sizes:
+            try:
+                fields = dict(line.split(':', 1) for line in
+                    (proc / str(process_id) / 'smaps_rollup').read_text().splitlines() if ':' in line)
+                pss = int(fields['Pss'].split()[0]) / 1024
+                if pss >= 0:
+                    sizes[process_id] = pss
+            except (OSError, ValueError, KeyError, IndexError):
+                # Hosts may deny smaps access. Retain RSS for that process.
+                pass
+    return sizes[pid], sum(sizes.values()), len(descendants) - 1
 
 
 class RuntimeProbe:

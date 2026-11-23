@@ -35,7 +35,7 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(music.slots, music.search_slots)
 
     async def test_high_baseline_refuses_to_spawn(self):
-        with patch.object(yt, 'memory_mib', return_value=310), patch.object(yt.asyncio, 'create_subprocess_exec', new=AsyncMock()) as spawn:
+        with patch.object(yt, 'memory_mib', return_value=350), patch.object(yt.asyncio, 'create_subprocess_exec', new=AsyncMock()) as spawn:
             with self.assertRaises(yt.SoundError):
                 await yt.run_worker('url', 'path')
             spawn.assert_not_awaited()
@@ -51,7 +51,7 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         real_sleep = asyncio.sleep
         async def fast_sleep(delay):
             await real_sleep(0)
-        with patch.object(yt, 'memory_mib', side_effect=[85, 305]), \
+        with patch.object(yt, 'memory_mib', side_effect=[85, 355]), \
              patch.object(yt.asyncio, 'create_subprocess_exec', new=AsyncMock(return_value=process)), \
              patch.object(yt, 'kill_download', side_effect=kill) as terminate, \
              patch.object(yt.asyncio, 'sleep', side_effect=fast_sleep):
@@ -60,6 +60,12 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('メモリ', str(caught.exception))
             self.assertNotIn('provider details', str(caught.exception))
             terminate.assert_awaited_once_with(process)
+
+    async def test_between_old_and_new_budget_is_allowed(self):
+        process = NS(communicate=AsyncMock(return_value=(b'ok', None)))
+        with patch.object(yt, 'memory_mib', return_value=335), \
+             patch.object(yt.asyncio, 'create_subprocess_exec', new=AsyncMock(return_value=process)):
+            self.assertEqual(await yt.run_worker('url', 'path'), b'ok')
 
     async def test_unknown_memory_still_uses_node_heap_budget_and_cleans_monitor(self):
         process = NS(communicate=AsyncMock(return_value=(b'ok', None)))

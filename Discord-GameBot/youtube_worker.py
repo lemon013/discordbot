@@ -68,6 +68,8 @@ def download(url, destination):
         'max_filesize': MAX_BYTES, 'progress_hooks': [progress],
         'socket_timeout': 15, 'retries': 1, 'fragment_retries': 1,
         'concurrent_fragment_downloads': 1, 'buffersize': 65536,
+        # Only direct HTTPS audio is selected: do not fetch/parse streaming manifests.
+        'extractor_args': {'youtube': {'skip': ['hls', 'dash', 'translated_subs']}},
         'js_runtimes': {'node': {'path': runtime}},
     }
     try:

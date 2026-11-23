@@ -11,6 +11,19 @@ import runtime_probe as mod
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
+    def test_proportional_memory_avoids_shared_page_double_count_and_falls_back_per_process(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for pid, parent, rss, pss in [(2, 1, 100000, 50000), (10, 2, 200000, 150000)]:
+                path = root / str(pid)
+                path.mkdir()
+                (path / 'status').write_text(f'PPid:\t{parent}\nVmRSS:\t{rss} kB\n')
+                (path / 'smaps_rollup').write_text(f'Pss:\t{pss} kB\n')
+            self.assertEqual(mod.process_memory(root, 2)[1], 300000 / 1024)
+            self.assertEqual(mod.process_memory(root, 2, proportional=True), (50000 / 1024, 200000 / 1024, 1))
+            (root / '10' / 'smaps_rollup').unlink()
+            self.assertEqual(mod.process_memory(root, 2, proportional=True)[1], 250000 / 1024)
+
     def test_memory_counts_recursive_children_but_not_other_processes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

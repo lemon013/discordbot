@@ -15,7 +15,7 @@ from youtube_rules import (MAX_BYTES, SoundError, MAX_DURATION, MAX_QUEUE, SEARC
                            normalize_url, normalize_playlist, normalize_search)
 
 DOWNLOAD_TIMEOUT = 110
-WORKER_MEMORY_MIB = 300
+WORKER_MEMORY_MIB = 350
 _worker_gates = weakref.WeakKeyDictionary()
 log = logging.getLogger(__name__)
 ERRORS = {
@@ -104,7 +104,7 @@ def memory_mib():
     if sys.platform != 'linux':
         return None
     from runtime_probe import process_memory
-    return process_memory()[1]
+    return process_memory(proportional=True)[1]
 
 
 async def run_worker(url, destination, playlist=False, search=False):
@@ -142,7 +142,7 @@ async def _run_worker(url, destination, playlist=False, search=False):
             usage = await asyncio.to_thread(memory_mib)
             if usage is not None and usage >= WORKER_MEMORY_MIB:
                 exceeded = True
-                log.warning('Stopping YouTube worker to protect Bot memory (tree_rss_mib=%.1f, budget_mib=%s)', usage, WORKER_MEMORY_MIB)
+                log.warning('Stopping YouTube worker to protect Bot memory (estimated_tree_mib=%.1f, budget_mib=%s, accounting=pss_with_rss_fallback)', usage, WORKER_MEMORY_MIB)
                 await kill_download(process)
                 return
 

@@ -146,6 +146,8 @@ class WorkerTests(unittest.TestCase):
             def extract(downloader, url, download):
                 self.assertEqual(url, URL)
                 self.assertTrue(Path(downloader.params['js_runtimes']['node']['path']).is_file())
+                self.assertEqual(downloader.params['format'], 'bestaudio[protocol=https]')
+                self.assertEqual(downloader.params['extractor_args']['youtube']['skip'], ['hls', 'dash', 'translated_subs'])
                 self.assertTrue(download)
                 path.write_bytes(b'audio')
                 return {'extractor_key': 'Youtube', 'title': 'configured'}
