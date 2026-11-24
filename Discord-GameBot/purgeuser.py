@@ -17,6 +17,8 @@ log = logging.getLogger("purgeuser")
 _active_channel_ids: set[int] = set()
 _BULK_DELETE_LIMIT = 100
 _PROGRESS_INTERVAL_SECONDS = 10
+_INDIVIDUAL_DELETE_CONCURRENCY = 3
+_INDIVIDUAL_DELETE_BATCH_SIZE = 9
 
 
 def _progress_embed(
@@ -125,6 +127,7 @@ async def _run_purge(
 ) -> None:
     scanned = matched = deleted = failed = 0
     recent_batch: list[discord.Message] = []
+    old_batch: list[discord.Message] = []
     cutoff = discord.utils.utcnow() - timedelta(days=14)
     last_update = 0.0
     note: str | None = "全履歴を確認しています。"
@@ -144,14 +147,22 @@ async def _run_purge(
 
     async def delete_individually(messages: list[discord.Message]) -> None:
         nonlocal deleted, failed
-        for message in messages:
+
+        semaphore = asyncio.Semaphore(_INDIVIDUAL_DELETE_CONCURRENCY)
+
+        async def delete_one(message: discord.Message) -> bool:
             try:
-                await message.delete()
-                deleted += 1
+                async with semaphore:
+                    await message.delete()
+                return True
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                failed += 1
                 log.warning("Could not delete message %s in channel %s", message.id, channel.id, exc_info=True)
-            await update_status()
+                return False
+
+        results = await asyncio.gather(*(delete_one(message) for message in messages))
+        deleted += sum(results)
+        failed += len(results) - sum(results)
+        await update_status()
 
     async def flush_recent_batch() -> None:
         nonlocal deleted
@@ -188,10 +199,18 @@ async def _run_purge(
                     await flush_recent_batch()
             else:
                 await flush_recent_batch()
-                await delete_individually([message])
+                old_batch.append(message)
+                if len(old_batch) >= _INDIVIDUAL_DELETE_BATCH_SIZE:
+                    batch = old_batch[:]
+                    old_batch.clear()
+                    await delete_individually(batch)
             await update_status()
 
         await flush_recent_batch()
+        if old_batch:
+            batch = old_batch[:]
+            old_batch.clear()
+            await delete_individually(batch)
         note = "全履歴の確認が完了しました。"
     except Exception as exc:
         note = f"エラー: 履歴の読み込み中に{type(exc).__name__}が発生しました。読み込み済みの対象は処理しました。"
