@@ -607,6 +607,9 @@ async def wordwolfex(interaction: discord.Interaction):
 from game_8192 import register_8192
 register_8192(bot)
 
+from purgeuser import register_purgeuser
+register_purgeuser(bot)
+
 @bot.tree.error
 async def on_app_command_error(interaction, error):
     original = getattr(error, 'original', error)
