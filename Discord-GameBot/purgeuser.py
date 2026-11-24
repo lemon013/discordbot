@@ -1,4 +1,4 @@
-"""Administrator command for deleting one user's messages from a text channel."""
+"""Delete every message by a selected user from one text channel."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from discord.ext import commands
 
 log = logging.getLogger("purgeuser")
 
-# A channel stays reserved while its confirmation is pending and while its job runs.
+# Reserve a channel while confirmation is pending or a purge is running.
 _active_channel_ids: set[int] = set()
 _BULK_DELETE_LIMIT = 100
 _PROGRESS_INTERVAL_SECONDS = 10
@@ -29,8 +29,14 @@ def _progress_embed(
     finished: bool = False,
     note: str | None = None,
 ) -> discord.Embed:
-    title = "削除完了" if finished else "メッセージ削除中"
-    embed = discord.Embed(title=title, color=discord.Color.green() if finished and not failed else discord.Color.orange())
+    embed = discord.Embed(
+        title="削除完了" if finished else "メッセージ削除中",
+        color=(
+            discord.Color.orange()
+            if not finished or failed or (note and note.startswith("エラー"))
+            else discord.Color.green()
+        ),
+    )
     embed.add_field(name="対象ユーザー", value=f"{target.mention} (`{target.id}`)", inline=False)
     embed.add_field(name="読み込み済み", value=f"{scanned:,}件", inline=True)
     embed.add_field(name="対象メッセージ", value=f"{matched:,}件", inline=True)
@@ -60,7 +66,9 @@ class PurgeUserConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.requester_id:
-            await interaction.response.send_message("この確認ボタンを操作できるのはコマンド実行者だけです。", ephemeral=True)
+            await interaction.response.send_message(
+                "この確認ボタンを操作できるのはコマンド実行者だけです。", ephemeral=True
+            )
             return False
         if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.manage_messages:
             await interaction.response.send_message("メッセージの管理権限が必要です。", ephemeral=True)
@@ -121,13 +129,15 @@ async def _run_purge(
     last_update = 0.0
     note: str | None = "全履歴を確認しています。"
 
-    async def update_status(*, force: bool = False) -> None:
+    async def update_status() -> None:
         nonlocal last_update
         now = time.monotonic()
-        if not force and now - last_update < _PROGRESS_INTERVAL_SECONDS:
+        if now - last_update < _PROGRESS_INTERVAL_SECONDS:
             return
         try:
-            await status_message.edit(embed=_progress_embed(target, scanned, matched, deleted, failed, note=note))
+            await status_message.edit(
+                embed=_progress_embed(target, scanned, matched, deleted, failed, note=note)
+            )
             last_update = now
         except discord.HTTPException:
             log.exception("Could not update /purgeuser progress message")
@@ -144,7 +154,7 @@ async def _run_purge(
             await update_status()
 
     async def flush_recent_batch() -> None:
-        nonlocal deleted, failed
+        nonlocal deleted
         if not recent_batch:
             return
         batch = recent_batch[:]
@@ -153,18 +163,20 @@ async def _run_purge(
             await delete_individually(batch)
             return
         try:
-            await channel.delete_messages(batch, reason=f"/purgeuser: requested by channel administrator; target={target.id}")
+            await channel.delete_messages(
+                batch,
+                reason=f"/purgeuser requested; target={target.id}",
+            )
             deleted += len(batch)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            # Bulk errors can be caused by one message in the batch; retry each item so
-            # remaining deletable messages are still processed and counts stay accurate.
-            log.warning("Bulk deletion failed in channel %s; retrying individually", channel.id, exc_info=True)
+            # Retry individually so one problematic message does not block the rest.
+            log.warning("Bulk delete failed in channel %s; retrying individually", channel.id, exc_info=True)
             await delete_individually(batch)
         await update_status()
 
     try:
-        # limit=None deliberately walks the complete message history using Discord's
-        # paginated history endpoint; bot.max_messages does not limit this iterator.
+        # limit=None paginates through the channel's complete history, independent of
+        # the bot's in-memory message cache size.
         async for message in channel.history(limit=None, oldest_first=False):
             scanned += 1
             if message.author.id != target.id:
@@ -180,13 +192,14 @@ async def _run_purge(
             await update_status()
 
         await flush_recent_batch()
+        note = "全履歴の確認が完了しました。"
     except Exception as exc:
-        note = f"履歴の読み込み中にエラーが発生しました（{type(exc).__name__}）。読み込み済みの対象は処理しました。"
+        note = f"エラー: 履歴の読み込み中に{type(exc).__name__}が発生しました。読み込み済みの対象は処理しました。"
         log.exception("History scan failed for /purgeuser in channel %s", channel.id)
     finally:
         try:
             await status_message.edit(
-                embed=_progress_embed(target, scanned, matched, deleted, failed, finished=True, note=note or "全履歴の確認が完了しました。")
+                embed=_progress_embed(target, scanned, matched, deleted, failed, finished=True, note=note)
             )
         except discord.HTTPException:
             log.exception("Could not publish /purgeuser completion status")
@@ -205,13 +218,22 @@ def register_purgeuser(bot: commands.Bot) -> None:
         channel: discord.TextChannel,
     ) -> None:
         if interaction.guild_id != channel.guild.id:
-            return await interaction.response.send_message("このサーバー内のチャンネルを指定してください。", ephemeral=True)
+            return await interaction.response.send_message(
+                "このサーバー内のチャンネルを指定してください。", ephemeral=True
+            )
         if channel.id in _active_channel_ids:
-            return await interaction.response.send_message("このチャンネルでは、すでに削除処理または確認待ちがあります。", ephemeral=True)
+            return await interaction.response.send_message(
+                "このチャンネルでは、すでに削除処理または確認待ちがあります。", ephemeral=True
+            )
 
         bot_member = channel.guild.me
         permissions = channel.permissions_for(bot_member) if bot_member else None
-        if permissions is None or not permissions.view_channel or not permissions.read_message_history or not permissions.manage_messages:
+        if (
+            permissions is None
+            or not permissions.view_channel
+            or not permissions.read_message_history
+            or not permissions.manage_messages
+        ):
             return await interaction.response.send_message(
                 "Botに「チャンネルを見る」「メッセージ履歴を読む」「メッセージの管理」の権限が必要です。",
                 ephemeral=True,
