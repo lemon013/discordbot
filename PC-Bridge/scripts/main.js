@@ -1,8 +1,6 @@
 import { setupPCLink } from './linkSetup.js';
 import { setupShopEffects } from '../../Minecraft-Discord-Bridge/scripts/shopEffects.js';
-
-const REGISTRY = 'custom_player_status:saved_scoreboards';
-const SNAPSHOTS = 'custom_player_status:snapshots';
+import { REGISTRY, SNAPSHOTS, TOMBSTONES, collectScoreboard, deleteScoreboardData } from './scoreSync.js';
 const managers = new Set(['yumokiti4325', 'greenview777', 'niwatori0815']);
 
 function classify(world, board, registry) {
@@ -42,7 +40,12 @@ export default async function main(app) {
     }
     const remove = message.match(/^!(?:saveremove|scoreremove)\s+(.+\S)\s+(\S+)\s*$/i);
     if (remove) {
-      app.properties.set(REGISTRY, registry().filter(e => e.worldName !== remove[1] || e.scoreboard !== remove[2]));
+      const worldName = remove[1], scoreboard = remove[2];
+      const current = registry();
+      const next = current.filter(e => e.worldName !== worldName || e.scoreboard !== scoreboard);
+      if (next.length === current.length) { send(`No saved scoreboard: ${worldName} / ${scoreboard}`); return false; }
+      deleteScoreboardData(app.properties, worldName, scoreboard);
+      app.properties.set(REGISTRY, next);
       send('§a保存対象を更新しました。'); return false;
     }
     send('!savescore <scoreboard> / !savelist / !saveremove <world> <scoreboard> / !scoreremove <world> <scoreboard>');
@@ -68,17 +71,17 @@ export default async function main(app) {
         for (const target of entries.filter(e => e.worldName === world.name)) {
           const objective = await world.scoreboard.getObjective(target.scoreboard).catch(() => undefined);
           if (!objective) continue;
-          const scores = await objective.getScores().catch(() => undefined), players = {};
+          const scores = await objective.getScores().catch(() => undefined);
           if (!scores) continue;
-          for (const info of scores) {
-            const name = String(info.participant?.displayName ?? '').trim();
-            if (name) players[name.toLowerCase()] = {name, score: info.score};
-          }
-          state.scoreboards[target.scoreboard] = {updatedAt: Date.now(), players};
+          state.scoreboards[target.scoreboard] = {
+            ...collectScoreboard(state.scoreboards[target.scoreboard], scores),
+            ...(target.createdAt ? {registeredAt: target.createdAt} : {}),
+          };
           changed = true;
         }
         if (changed) { state.updatedAt = Date.now(); snapshots[world.name] = state; }
       }
+      if (!app.properties.get(TOMBSTONES)) app.properties.set(TOMBSTONES, {});
       app.properties.set(SNAPSHOTS, snapshots);
     } catch (error) { app.logger.error('[PC score collection]', error); }
     finally { polling = false; }
