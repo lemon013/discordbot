@@ -1,5 +1,6 @@
 """Small process-local disk cache; never retain decoded audio in Python memory."""
 import asyncio
+import os
 from collections import OrderedDict
 from pathlib import Path
 import shutil
@@ -91,4 +92,13 @@ async def disk_call(function, *args):
         raise
 
 
-AUDIO_CACHE = AudioCache()
+def cache_limit():
+    default = 256 if os.name == 'nt' else 50
+    try:
+        size = int(os.getenv('YOUTUBE_AUDIO_CACHE_MIB', str(default)))
+    except ValueError:
+        size = default
+    return max(0, min(size, 2048)) * 1024 * 1024
+
+
+AUDIO_CACHE = AudioCache(limit=cache_limit(), ttl=6 * 3600 if os.name == 'nt' else 3600)
