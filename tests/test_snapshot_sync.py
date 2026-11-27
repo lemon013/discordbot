@@ -8,7 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'Discord-GameBot'))
-from snapshot_sync import REGISTRY, SNAPSHOTS, encode_snapshot, decode_snapshot, atomic_write, receive_latest
+from snapshot_sync import (REGISTRY, SNAPSHOTS, TOMBSTONES, encode_snapshot, decode_snapshot,
+                           atomic_write, merge_score_data, receive_latest, save_generation)
 
 SECRET = 'test-secret-' * 4
 
@@ -32,7 +33,7 @@ class SnapshotTests(unittest.TestCase):
         decoded = decode_snapshot(encode_snapshot(data, SECRET), SECRET)
         self.assertEqual(find_status(decoded, 'Alice', 'MurderMysteryRe:MASTER')[0],
                          {'wingame': 0, 'Murder': 0, 'Crew': 0, 'Other': 0})
-        self.assertIn('**第三陣営になった数**: 0', render(decoded, 'MurderMysteryRe:MASTER', 'Alice'))
+        self.assertIn('**��O�w�c�ɂȂ�����**: 0', render(decoded, 'MurderMysteryRe:MASTER', 'Alice'))
         self.assertEqual(classify(registry[-2], registry), 'unlimited')
         self.assertIsNone(classify(registry[-1], registry))
         explicit = {'worldName': 'World', 'scoreboard': 'wingame', 'gameKey': 'unlimited'}
@@ -88,6 +89,50 @@ class SnapshotTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 atomic_write(path, {'invalid': float('nan')})
             self.assertEqual(json.loads(path.read_text()), sample())
+
+    def test_receiver_merges_player_differences_and_filters_unknown_name(self):
+        old = sample(42)
+        incoming = sample(99)
+        incoming[SNAPSHOTS]['unlimited']['scoreboards']['up']['players'] = {
+            'bob': {'name': 'Bob', 'score': 5},
+            'commands.scoreboard.players.offlineplayername': {
+                'name': 'commands.scoreboard.players.offlinePlayerName', 'score': 999},
+        }
+        merged = merge_score_data(old, incoming)
+        players = merged[SNAPSHOTS]['unlimited']['scoreboards']['up']['players']
+        self.assertEqual(players['alice']['score'], 42)
+        self.assertEqual(players['bob']['score'], 5)
+        self.assertNotIn('commands.scoreboard.players.offlineplayername', players)
+
+    def test_deletion_tombstone_prevents_old_snapshot_resurrection(self):
+        old = sample()
+        old[REGISTRY][0]['createdAt'] = 10
+        deleted = {REGISTRY: [], SNAPSHOTS: {}, TOMBSTONES: {'unlimited\u001fup': 20}}
+        merged = merge_score_data(old, deleted)
+        self.assertEqual(merged[REGISTRY], [])
+        self.assertEqual(merged[SNAPSHOTS], {})
+        readded = sample(8)
+        readded[REGISTRY][0]['createdAt'] = 30
+        readded[SNAPSHOTS]['unlimited']['scoreboards']['up']['players'] = {
+            'bob': {'name': 'Bob', 'score': 8}}
+        restored = merge_score_data(merged, readded)
+        self.assertEqual(len(restored[REGISTRY]), 1)
+        self.assertIn('up', restored[SNAPSHOTS]['unlimited']['scoreboards'])
+        self.assertNotIn('alice', restored[SNAPSHOTS]['unlimited']['scoreboards']['up']['players'])
+
+    def test_generation_backups_keep_distinct_versions_bounded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'status.json'
+            path.write_text('{"n":1}', encoding='utf-8')
+            first = save_generation(path, limit=2)
+            self.assertEqual(save_generation(path, limit=2), first)
+            path.write_text('{"n":2}', encoding='utf-8')
+            second = save_generation(path, limit=2)
+            path.write_text('{"n":3}', encoding='utf-8')
+            save_generation(path, limit=2)
+            self.assertTrue(first.exists() is False)
+            self.assertTrue(second.exists())
+            self.assertEqual(len(list((Path(directory) / 'status-backups').glob('*.json'))), 2)
 
 
 class ReceiverTests(unittest.TestCase):
@@ -190,3 +235,4 @@ class ReceiverTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

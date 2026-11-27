@@ -15,12 +15,14 @@ sys.path.insert(0, str(ROOT / 'Discord-GameBot'))
 
 async def upload_loop(process, token, channel, secret):
     import aiohttp
-    from snapshot_sync import encode_snapshot, REGISTRY, SNAPSHOTS
+    from snapshot_sync import encode_snapshot, save_generation, REGISTRY, SNAPSHOTS
     path = LOCAL / '.discord-mcbe' / 'data.json'
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30),
                                      headers={'Authorization': f'Bot {token}'}) as session:
         while process.poll() is None:
             try:
+                if path.exists():
+                    await asyncio.to_thread(save_generation, path, score_only=True)
                 data = json.loads(path.read_text(encoding='utf-8-sig'))
                 if REGISTRY not in data or SNAPSHOTS not in data:
                     logging.info('Waiting for registered Minecraft scoreboards')
