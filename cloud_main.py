@@ -1,6 +1,7 @@
 """Cloud entry point: Discord only; no Minecraft listener or Bun required."""
 import os
 import runpy
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -15,6 +16,14 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(name)s:%(message)s')
 from runtime_probe import install
 probe = install()
+try:
+    revision = subprocess.run(
+        ['git', 'rev-parse', '--short', 'HEAD'], cwd=ROOT, capture_output=True,
+        text=True, check=True, timeout=3, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+    ).stdout.strip()
+except (OSError, subprocess.SubprocessError):
+    revision = 'unavailable'
+logging.getLogger('deployment').info('GameBot revision: %s', revision)
 try:
     from player_backup import bootstrap
     asyncio.run(bootstrap())
