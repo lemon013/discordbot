@@ -660,6 +660,8 @@ from sound import register_sound
 sound_service = register_sound(bot)
 from youtube_play import register_youtube_play
 register_youtube_play(bot, sound_service)
+from birthdays import register_birthdays
+register_birthdays(bot)
 from soundboard import register_soundboard
 register_soundboard(bot, sound_service)
 from voice_reading import register_voice
