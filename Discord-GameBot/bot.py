@@ -1,7 +1,9 @@
+import asyncio
 import os, random, logging, unicodedata
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from casino import CasinoError, MAX_BET
 from dataclasses import dataclass, field
 from typing import Optional
 import discord
@@ -118,6 +120,8 @@ class Game:
     end_if_wolf_ng: bool = False
     wolf_ids: set[int] = field(default_factory=set)
     board_message_id: Optional[int] = None
+    wager: int = 0
+    wager_timer: Optional[asyncio.Task] = field(default=None, repr=False)
     votes: dict[int, Optional[int]] = field(default_factory=dict)
 
 games: dict[int, Game] = {}
@@ -168,6 +172,8 @@ def recruitment_embed(game):
     names = [safe_name(p.user) for p in game.players.values()]
     embed.add_field(name=f'参加者 ({len(names)}/{MAX_PLAYERS})', value='\n'.join('• '+n for n in names) or 'まだいません', inline=False)
     embed.add_field(name='現在の設定', value=(f'最大ウルフ数：{game.max_wolves}人\n1人あたりのNGワード数：{game.ng_count}個\nウルフなし試合：{"有効（20%）" if game.allow_no_wolf else "無効"}\nNGワード：{"有効" if game.ng_enabled else "無効"}\nNG違反時の役職公開：{"有効" if game.reveal_role_on_ng else "無効"}\nNG違反したウルフの即終了：{"有効" if game.end_if_wolf_ng else "無効"}'), inline=False)
+    wager = f'{game.wager:,}ジュエル／人。勝者に1.25倍（切り上げ）を追加。' if game.wager else 'なし'
+    embed.add_field(name='賭けジュエル', value=wager, inline=False)
     embed.set_footer(text=f'募集主ID: {game.host_id} | 最低{MIN_PLAYERS}人')
     return embed
 
@@ -299,11 +305,15 @@ class EndOnWolfNGSelect(BaseSettingSelect):
 class RecruitmentView(discord.ui.View):
     def __init__(self, guild_id):
         super().__init__(timeout=None); self.guild_id = guild_id
-    def get_game(self): return games.get(self.guild_id)
+    def get_game(self, interaction):
+        game = games.get(self.guild_id)
+        if game and interaction.message and interaction.message.id == game.board_message_id:
+            return game
+        return None
 
     @discord.ui.button(label='参加 / 退出', style=discord.ButtonStyle.success, emoji='🙋', custom_id='wordwolfex:join', row=0)
     async def join(self, interaction, button):
-        game = self.get_game()
+        game = self.get_game(interaction)
         if not game or game.phase != 'recruiting': return await interaction.response.send_message('現在、参加受付を行っていません。', ephemeral=True)
         if interaction.user.bot: return await interaction.response.send_message('Botは参加できません。', ephemeral=True)
         if interaction.user.id in game.players:
@@ -315,7 +325,7 @@ class RecruitmentView(discord.ui.View):
 
     @discord.ui.button(label='スタート', style=discord.ButtonStyle.primary, emoji='▶️', custom_id='wordwolfex:start', row=0)
     async def start(self, interaction, button):
-        game = self.get_game()
+        game = self.get_game(interaction)
         if not game or game.phase != 'recruiting': return await interaction.response.send_message('募集は終了しています。', ephemeral=True)
         if not is_host(interaction, game): return await interaction.response.send_message('募集主またはサーバー管理者のみ操作できます。', ephemeral=True)
         if len(game.players) < MIN_PLAYERS: return await interaction.response.send_message(f'最低{MIN_PLAYERS}人必要です。現在{len(game.players)}人です。', ephemeral=True)
@@ -323,7 +333,7 @@ class RecruitmentView(discord.ui.View):
 
     @discord.ui.button(label='ジャンル変更', style=discord.ButtonStyle.secondary, emoji='🗂️', custom_id='wordwolfex:genre', row=0)
     async def change_genre(self, interaction, button):
-        game = self.get_game()
+        game = self.get_game(interaction)
         if not game or game.phase != 'recruiting': return await interaction.response.send_message('募集時のみジャンルを変更できます。', ephemeral=True)
         if not is_host(interaction, game): return await interaction.response.send_message('募集主またはサーバー管理者のみ変更できます。', ephemeral=True)
         game.genre = random.choice([g for g in GENRE_NAMES if g != game.genre]); choose_topic(game)
@@ -331,7 +341,7 @@ class RecruitmentView(discord.ui.View):
 
     @discord.ui.button(label='設定', style=discord.ButtonStyle.secondary, emoji='⚙️', custom_id='wordwolfex:settings', row=0)
     async def settings(self, interaction, button):
-        game = self.get_game()
+        game = self.get_game(interaction)
         if not game or game.phase != 'recruiting': return await interaction.response.send_message('募集時のみ設定できます。', ephemeral=True)
         if not is_host(interaction, game): return await interaction.response.send_message('募集主またはサーバー管理者のみ変更できます。', ephemeral=True)
         await interaction.response.send_message('ゲーム設定を選択してください。', view=SettingsView(game), ephemeral=True)
@@ -360,6 +370,13 @@ async def start_game(interaction, game):
     if needed > len(COMMON_NG_WORDS):
         game.phase = 'recruiting'
         return await interaction.followup.send('共通NGワード候補が不足しています。COMMON_NG_WORDSに候補を追加してください。', ephemeral=True)
+    if game.wager:
+        try:
+            await asyncio.to_thread(bot.party_rewards.reserve_wager, game.guild_id, game.reward_id,
+                                    tuple(ids), game.wager)
+        except CasinoError as error:
+            game.phase = 'recruiting'
+            return await interaction.followup.send(str(error), ephemeral=True)
     chosen = random.sample(COMMON_NG_WORDS, needed) if needed else []
     for index, (pid, player) in enumerate(game.players.items()):
         player.role = 'ウルフ' if pid in game.wolf_ids else '市民'
@@ -373,17 +390,34 @@ async def start_game(interaction, game):
         try: await player.user.send(embed=player_dm(player, others, game.genre))
         except (discord.Forbidden, discord.HTTPException): failed.append(safe_name(player.user))
     if failed:
+        if game.wager:
+            await asyncio.to_thread(bot.party_rewards.settle_wager, game.reward_id)
+            game.reward_id = __import__('uuid').uuid4().hex
         game.phase = 'recruiting'; game.players.clear()
         await interaction.channel.send('⚠️ DMを送信できない参加者がいたため開始を中止しました。対象：'+', '.join(failed)+'\nDM受信設定を確認して再参加してください。')
         return await interaction.followup.send('DM送信に失敗したため開始を中止しました。', ephemeral=True)
     game.phase = 'discussion'
+    if game.wager:
+        game.wager_timer = asyncio.create_task(expire_wordwolf_wager(game))
     wolf_info = 'ウルフなし試合です。' if wolf_count == 0 else f'ウルフは{wolf_count}人です。'
     await interaction.channel.send(f'✅ **wordwolfex開始！**\nジャンル：**{game.genre}**\n{wolf_info}\n各参加者に個別DMを送信しました。議論終了後、募集主が `/wordwolfex` を再実行してください。')
     await interaction.followup.send('ゲームを開始しました。参加者全員にDMを送信しました。', ephemeral=True)
 
+async def expire_wordwolf_wager(game):
+    await asyncio.sleep(50 * 60)
+    if games.get(game.guild_id) is game and game.phase in ('discussion', 'voting'):
+        game.phase = 'ending'
+        await asyncio.to_thread(bot.party_rewards.settle_wager, game.reward_id)
+        games.pop(game.guild_id, None)
+        channel = bot.get_channel(game.channel_id)
+        if channel:
+            await channel.send('時間切れでワードウルフを中止し、賭けたジュエルを返金しました。')
+
+
 class VoteView(discord.ui.View):
     def __init__(self, game):
         super().__init__(timeout=180); self.guild_id = game.guild_id
+        self.game = game
         for pid, player in game.players.items():
             b = discord.ui.Button(label=f'追放：{player.user.display_name}'[:80], style=discord.ButtonStyle.secondary, custom_id=f'wordwolfex:vote:{pid}')
             b.callback = self.make_callback(pid); self.add_item(b)
@@ -392,7 +426,7 @@ class VoteView(discord.ui.View):
     def make_callback(self, target):
         async def callback(interaction):
             game = games.get(self.guild_id)
-            if not game or game.phase != 'voting': return await interaction.response.send_message('現在投票できません。', ephemeral=True)
+            if game is not self.game or game.phase != 'voting': return await interaction.response.send_message('現在投票できません。', ephemeral=True)
             if interaction.user.id not in game.players: return await interaction.response.send_message('ゲーム参加者のみ投票できます。', ephemeral=True)
             if interaction.user.id in game.votes: return await interaction.response.send_message('投票済みです。', ephemeral=True)
             if target == interaction.user.id: return await interaction.response.send_message('自分には投票できません。', ephemeral=True)
@@ -402,7 +436,15 @@ class VoteView(discord.ui.View):
         return callback
     async def on_timeout(self):
         game = games.get(self.guild_id); channel = bot.get_channel(game.channel_id) if game else None
-        if game and channel and game.phase == 'voting': await resolve_votes(channel, game)
+        if game is self.game and channel and game.phase == 'voting': await resolve_votes(channel, game)
+
+async def settle_wordwolf_wager(game, outcomes):
+    game.phase = 'ending'
+    if game.wager_timer:
+        game.wager_timer.cancel()
+    if game.wager:
+        await asyncio.to_thread(bot.party_rewards.settle_wager, game.reward_id, outcomes)
+
 
 async def resolve_votes(channel, game):
     if game.phase != 'voting': return
@@ -422,6 +464,8 @@ async def resolve_votes(channel, game):
         winner, note = '市民', 'ウルフを追放したため市民勝利です。'
     else:
         winner, note = 'ウルフ', '市民を追放したためウルフ勝利です。'
+    outcomes = {uid: ((uid in game.wolf_ids) == (winner == 'ウルフ')) for uid in game.players}
+    await settle_wordwolf_wager(game, outcomes)
     embed = discord.Embed(title='🐺 wordwolfex — GAME RESULT', description=f'**勝利陣営：{winner}**\n{note}', color=discord.Color.green() if winner == '市民' else discord.Color.red())
     embed.add_field(name='追放結果', value='誰も追放されませんでした。' if eliminated is None else safe_name(game.players[eliminated].user), inline=False)
     await channel.send(embed=embed)
@@ -437,16 +481,18 @@ async def resolve_votes(channel, game):
         chunk += line+'\n'
     if chunk: await channel.send('**全員の役職・お題・NGワード**\n'+chunk)
     from party_rewards import reward_party
-    outcomes = {uid: ((uid in game.wolf_ids) == (winner == 'ウルフ')) for uid in game.players}
     await reward_party(bot, channel.guild, channel, game.reward_id, outcomes)
     games.pop(game.guild_id, None)
+    if game.wager and any(outcomes.values()):
+        await channel.send(f'勝利者に1人あたり 💎 {(game.wager * 5 + 3) // 4:,} の賭け報酬を追加しました。')
 
 
 async def finish_by_wolf_ng(channel, game, player, word):
     """ウルフのNG違反で試合を即時終了し、市民勝利として結果を公開する。"""
     if game.phase != 'discussion':
         return
-    game.phase = 'finished'
+    outcomes = {uid: uid not in game.wolf_ids for uid in game.players}
+    await settle_wordwolf_wager(game, outcomes)
     embed = discord.Embed(
         title='🚨 NG WORD — GAME END',
         description=(
@@ -471,7 +517,7 @@ async def finish_by_wolf_ng(channel, game, player, word):
     if chunk:
         await channel.send('**全員の役職・お題・NGワード**\n' + chunk)
     from party_rewards import reward_party
-    await reward_party(bot, channel.guild, channel, game.reward_id, {uid: uid not in game.wolf_ids for uid in game.players})
+    await reward_party(bot, channel.guild, channel, game.reward_id, outcomes)
     games.pop(game.guild_id, None)
 
 
@@ -617,10 +663,15 @@ async def bridge_delete(interaction: discord.Interaction, userid: str):
 
 @bot.tree.command(name='wordwolfex', description='ワードウルフEXを開始、または議論を終了します')
 @app_commands.guild_only()
-async def wordwolfex(interaction: discord.Interaction):
+@app_commands.describe(wager='新規募集時の1人あたりの賭けジュエル。0なら賭けなし',
+                       cancel='進行中の試合を中止し、賭けジュエルを返金します')
+async def wordwolfex(interaction: discord.Interaction, wager: app_commands.Range[int, 0, MAX_BET] = 0,
+                     cancel: bool = False):
     gid = interaction.guild_id; game = games.get(gid)
     if game is None:
-        game = Game(guild_id=gid, channel_id=interaction.channel_id, host_id=interaction.user.id)
+        if cancel:
+            return await interaction.response.send_message('中止できる試合はありません。', ephemeral=True)
+        game = Game(guild_id=gid, channel_id=interaction.channel_id, host_id=interaction.user.id, wager=wager)
         game.genre = random.choice(GENRE_NAMES); choose_topic(game); games[gid] = game
         await interaction.response.send_message(embed=recruitment_embed(game), view=RecruitmentView(gid))
         msg = await interaction.original_response(); game.board_message_id = msg.id; return
@@ -628,6 +679,16 @@ async def wordwolfex(interaction: discord.Interaction):
         return await interaction.response.send_message('このサーバーでは別のチャンネルでゲームが進行中です。', ephemeral=True)
     if not is_host(interaction, game):
         return await interaction.response.send_message('募集主またはサーバー管理者のみ実行できます。', ephemeral=True)
+    if cancel and game.phase in ('recruiting', 'discussion', 'voting'):
+        game.phase = 'ending'
+        await interaction.response.defer(ephemeral=True)
+        await settle_wordwolf_wager(game, None)
+        games.pop(gid, None)
+        return await interaction.followup.send('試合を中止しました。預かった賭けジュエルは返金されます。')
+    if cancel and game.phase == 'starting':
+        return await interaction.response.send_message('開始処理中です。完了後に中止してください。', ephemeral=True)
+    if game.phase == 'ending':
+        return await interaction.response.send_message('試合の精算中です。', ephemeral=True)
     if game.phase == 'discussion':
         game.phase = 'voting'
         await interaction.response.send_message('🗳️ **議論終了！投票してください。**\n追放したいプレイヤー、または「誰も追放しない」を選んでください。', view=VoteView(game))
@@ -683,6 +744,21 @@ register_shop(bot)
 from party_rewards import PartyRewards
 from guess_number import register_guess
 bot.party_rewards = PartyRewards()
+
+
+@tasks.loop(minutes=1)
+async def refund_expired_party_wagers():
+    try:
+        await asyncio.to_thread(bot.party_rewards.refund_expired_wagers)
+    except Exception:
+        log.exception('期限切れの対戦ゲーム賭け金を返金できませんでした')
+
+
+@bot.listen('on_ready')
+async def start_party_wager_refunds():
+    if not refund_expired_party_wagers.is_running():
+        refund_expired_party_wagers.start()
+
 register_guess(bot)
 from social_games import register_social_games
 register_social_games(bot)
