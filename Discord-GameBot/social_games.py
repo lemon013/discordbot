@@ -10,7 +10,7 @@ import uuid
 import discord
 from discord import app_commands
 from casino import CasinoError, MAX_BET
-from party_rewards import reward_party
+from party_rewards import reward_party, wager_share
 
 log = logging.getLogger(__name__)
 RNG = random.SystemRandom()
@@ -143,7 +143,7 @@ class SocialGame(discord.ui.View):
                  'Bot版：議論3分→一斉投票1分。同票・全員未投票はインサイダー勝利。') +
                 '\n\n勝利：100ジュエル＋10XP／敗北：50ジュエル＋5XP\n中止・準備中の時間切れは報酬なし。')
             if self.kind == 'insider':
-                wager = f'{self.wager:,}ジュエル／人。勝者に1.25倍（切り上げ）を追加。' if self.wager else 'なし'
+                wager = f'{self.wager:,}ジュエル／人。賭け金の総額×1.25を勝者で山分け（端数切り捨て）。' if self.wager else 'なし'
                 embed.add_field(name='賭けジュエル', value=wager, inline=False)
         elif self.phase == 'ito':
             embed.description = f'お題：**{self.topic}**\n1＝低い・弱い、100＝高い・強い。\n全員のヒントがそろったら、相談して小さいと思う人から出してください。'
@@ -166,9 +166,10 @@ class SocialGame(discord.ui.View):
         else:
             embed.description = self.result
             if self.outcomes is not None:
+                share = wager_share(self.wager * len(self.outcomes), sum(self.outcomes.values()))
                 reward_text = '\n'.join(f'{clean(self.players[uid].display_name)}：'
                     + ('100ジュエル＋10XP' if won else '50ジュエル＋5XP')
-                    + (f'＋賭け報酬 {(self.wager * 5 + 3) // 4:,}ジュエル' if won and self.wager else '') for uid, won in self.outcomes.items())
+                    + (f'＋賭け報酬 {share:,}ジュエル' if won and self.wager else '') for uid, won in self.outcomes.items())
                 embed.add_field(name='報酬（一部未処理：再試行が必要）' if self.rewards_pending else '報酬', value=reward_text, inline=False)
         if self.kind == 'ito' and self.phase in ('lobby', 'ito'):
             embed.add_field(name='数字の重複', value='あり（同じ数字はどちらが先でもOK）' if self.allow_duplicates else 'なし', inline=False)
