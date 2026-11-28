@@ -24,7 +24,7 @@ MAX_BALANCE = 10**15
 SYMBOLS = ('💎', '⭐', '🔔', '🍒', '🍇', '🍋')
 TRIPLE_MULTIPLIERS = (50, 20, 15, 10, 8, 5)
 JST = timezone(timedelta(hours=9))
-GAME_NAMES = dict(slot='スロット', coinflip='コイントス', dice='サイコロ')
+GAME_NAMES = dict(slot='スロット', coinflip='コイントス', dice='サイコロ', highlow='ハイ＆ロー')
 
 
 class CasinoError(Exception):
@@ -35,14 +35,19 @@ def draw(game, wager, choice=None):
     if game == 'slot':
         reels = [secrets.randbelow(len(SYMBOLS)) for _ in range(3)]
         distinct = len(set(reels))
-        multiplier = TRIPLE_MULTIPLIERS[reels[0]] if distinct == 1 else (1 if distinct == 2 else 0)
-        return {'outcome': ' '.join(SYMBOLS[index] for index in reels), 'payout': wager * multiplier}
+        multiplier = TRIPLE_MULTIPLIERS[reels[0]] if distinct == 1 else 0
+        return {'outcome': ' '.join(SYMBOLS[index] for index in reels), 'payout': (wager * 5 + 3) // 4 if distinct == 2 else wager * multiplier}
     if game == 'coinflip':
         face = secrets.randbelow(2)
         return {'outcome': ('表', '裏')[face], 'choice': ('表', '裏')[choice],
-                'payout': wager * 19 // 10 if face == choice else 0}
+                'payout': wager * 2 if face == choice else 0}
+    if game == 'highlow':
+        first, second = (secrets.randbelow(13) + 1 for _ in range(2))
+        correct = second > first if choice == 1 else second < first
+        return {'outcome': f'{first} → {second}', 'choice': '高い' if choice == 1 else '低い',
+                'payout': wager * 13 // 6 if correct else 0}
     number = secrets.randbelow(6) + 1
-    return {'outcome': str(number), 'choice': str(choice), 'payout': wager * 11 // 2 if number == choice else 0}
+    return {'outcome': str(number), 'choice': str(choice), 'payout': wager * 6 if number == choice else 0}
 
 
 class CasinoStore:
@@ -54,6 +59,12 @@ class CasinoStore:
             from ticket_store import initialize
             initialize(db)
             db.executescript('''
+                CREATE TABLE IF NOT EXISTS party_wagers (
+                    game_id TEXT NOT NULL, guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL, expires_at REAL NOT NULL,
+                    PRIMARY KEY(game_id,user_id));
+                CREATE INDEX IF NOT EXISTS party_wager_expiry ON party_wagers(expires_at);
+                CREATE INDEX IF NOT EXISTS party_wager_wallet ON party_wagers(guild_id,user_id);
                 CREATE TABLE IF NOT EXISTS casino_wallets (
                     guild_id INTEGER NOT NULL,user_id INTEGER NOT NULL,
                     balance INTEGER NOT NULL CHECK(balance>=0),last_daily TEXT,last_play REAL,
@@ -88,15 +99,22 @@ class CasinoStore:
         return json.loads(row['payload'])
 
     @staticmethod
-    def finish(db, event_id, guild_id, user_id, kind, old_balance, result, now):
-        balance = result['balance']
+    def check_balance(db, guild_id, user_id, balance):
         if not 0 <= balance <= MAX_BALANCE:
             raise CasinoError('ジュエルの保有上限を超えるため処理できません。')
+        reserved = db.execute(
+            'SELECT COALESCE(SUM((amount * 5 + 3) / 4), 0) FROM party_wagers WHERE guild_id=? AND user_id=?',
+            (guild_id, user_id),
+        ).fetchone()[0]
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='blackjack_rounds'").fetchone():
-            reserved = sum(row[0] * 5 // 2 for row in db.execute(
+            reserved += sum(row[0] * 5 // 2 for row in db.execute(
                 "SELECT wager FROM blackjack_rounds WHERE guild_id=? AND user_id=? AND status='active'", (guild_id, user_id)))
-            if balance + reserved > MAX_BALANCE:
-                raise CasinoError('ブラックジャックの払い戻し分を確保するため、保有上限付近では処理できません。')
+        if balance + reserved > MAX_BALANCE:
+            raise CasinoError('進行中のゲームの払い戻し分を確保するため、保有上限付近では処理できません。')
+    @staticmethod
+    def finish(db, event_id, guild_id, user_id, kind, old_balance, result, now):
+        balance = result['balance']
+        CasinoStore.check_balance(db, guild_id, user_id, balance)
         db.execute('UPDATE casino_wallets SET balance=? WHERE guild_id=? AND user_id=?', (balance, guild_id, user_id))
         db.execute('INSERT INTO casino_transactions VALUES(?,?,?,?,?,?,?,?)',
                    (event_id, guild_id, user_id, kind, balance - old_balance, balance,
@@ -167,6 +185,8 @@ class CasinoStore:
             raise CasinoError(f'賭け金は{MIN_BET}〜{MAX_BET:,}ジュエルで指定してください。')
         if game == 'coinflip' and choice not in (0, 1):
             raise CasinoError('表または裏を選んでください。')
+        if game == 'highlow' and choice not in (0, 1):
+            raise CasinoError('高い・低いのどちらかを選んでください。')
         if game == 'dice' and (not isinstance(choice, int) or not 1 <= choice <= 6):
             raise CasinoError('1〜6を選んでください。')
         now = time.time() if now is None else now
@@ -298,17 +318,18 @@ class Casino:
             elif action == 'history':
                 rows = await asyncio.to_thread(self.store.history, guild_id, user_id)
                 text = '**💎 最近のジュエル履歴（最大10件）**\n' + ('\n'.join(
-                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'solo_reward': 'ソロゲーム報酬', 'level_reward': 'レベルアップ報酬', 'daily': 'デイリー', 'edit': '管理者編集', 'gift_send': '送金', 'gift_receive': '受取', 'shop': 'ショップ', 'blackjack_bet': 'ブラックジャック掛け金', 'blackjack': 'ブラックジャック払い戻し'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
+                    f"<t:{int(row['created_at'])}:f> {GAME_NAMES.get(row['kind'], {'solo_reward': 'ソロゲーム報酬', 'level_reward': 'レベルアップ報酬', 'daily': 'デイリー', 'edit': '管理者編集', 'gift_send': '送金', 'gift_receive': '受取', 'shop': 'ショップ', 'party_bet': '対戦ゲームの賭け金', 'party_payout': '対戦ゲームの払い戻し', 'party_refund': '対戦ゲームの返金', 'blackjack_bet': 'ブラックジャック掛け金', 'blackjack': 'ブラックジャック払い戻し'}.get(row['kind'], row['kind']))}：💎 {row['delta']:+,} / 残高 {row['balance_after']:,}"
                     for row in rows) or 'まだ履歴がありません。')
             else:
                 text = ('**🎰 カジノ / 💎ジュエル**\n初期残高：0ジュエル。デイリー：500ジュエル（日本時間0時更新）。\n'
                         '`/jewel balance` 残高 / `/jewel daily` デイリー / `/jewel history` 履歴\n'
                         '`/jewel leaderboard` ランキング / `/jewel edit` 管理者編集 / `/gift` ジュエルを送る\n'
-                        '`/casino slot`：3つ揃い 💎50倍 / ⭐20倍 / 🔔15倍 / 🍒10倍 / 🍇8倍 / 🍋5倍。2つ揃いは1倍。\n'
-                        '`/casino coinflip`：表・裏を当てると1.9倍。\n'
-                        '`/casino dice`：1〜6を当てると5.5倍。\n'
+                        '`/casino slot`：3つ揃い 💎50倍 / ⭐20倍 / 🔔15倍 / 🍒10倍 / 🍇8倍 / 🍋5倍。2つ揃いは1.25倍（端数切り上げ）。\n'
+                        '`/casino coinflip`：表・裏を当てると2倍。\n'
+                        '`/casino dice`：1〜6を当てると6倍。\n'
+                        '`/casino highlow`：1〜13の2枚目が1枚目より高いか低いかを予想。当たりは13/6倍（約2.17倍）。同値は外れ。\n'
                         '`/casino blackjack`：ヒット・スタンドで21を目指す。通常勝利2倍、最初の21は2.5倍、引き分けは返却。\n'
-                        '賭け金：10〜10,000。倍率は賭け金を含む払い戻しで、小数点以下切り捨て。外れは0。\n'
+                        '賭け金：10〜10,000。倍率は賭け金を含む払い戻しで、原則小数点以下切り捨て。外れは0。\n'
                         'ジュエルはこのサーバー内のゲーム用通貨です。')
             await interaction.edit_original_response(content=text, allowed_mentions=discord.AllowedMentions.none())
         except CasinoError as error:
@@ -342,6 +363,12 @@ def register_casino(bot):
     @app_commands.describe(wager='賭けるジュエル（10〜10000）', number='予想する出目（1〜6）')
     async def dice(interaction: discord.Interaction, wager: app_commands.Range[int, 10, 10000], number: app_commands.Range[int, 1, 6]):
         await service.execute(interaction, 'dice', wager=wager, choice=number)
+
+    @casino.command(name='highlow', description='2枚目の数字が1枚目より高いか低いかを予想します')
+    @app_commands.choices(direction=[app_commands.Choice(name='低い', value=0), app_commands.Choice(name='高い', value=1)])
+    @app_commands.describe(wager='賭けるジュエル（10〜10000）', direction='1枚目に対する2枚目の数字')
+    async def highlow(interaction: discord.Interaction, wager: app_commands.Range[int, 10, 10000], direction: int):
+        await service.execute(interaction, 'highlow', wager=wager, choice=direction)
 
     @jewel.command(name='balance', description='ジュエル残高を確認します')
     async def balance(interaction: discord.Interaction, member: discord.Member | None = None):
