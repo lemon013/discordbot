@@ -92,7 +92,7 @@ class BlackjackStore:
                 state['dealer'].append(state['deck'].pop())
             dealer = hand_value(state['dealer'])
             if dealer > 21 or player > dealer:
-                outcome, payout = 'win', state['wager'] * 2
+                outcome, payout = 'win', (state['wager'] * 9 + 3) // 4
             elif player == dealer:
                 outcome, payout = 'push', state['wager']
             else:
@@ -223,7 +223,7 @@ def blackjack_embed(state):
         embed.add_field(name='残高', value=f"💎 {state['balance']:,} ジュエル", inline=False)
     if not done:
         embed.add_field(name='自動スタンド', value=f"<t:{int(state['expires_at'])}:R>", inline=False)
-    embed.set_footer(text='通常勝利2倍／最初の21は2.5倍／引き分け返却。2分操作がないと自動スタンド。')
+    embed.set_footer(text='通常勝利2.25倍（端数切り上げ）／最初の21は2.5倍／引き分け返却。2分操作がないと自動スタンド。')
     if state.get('xp_reward'):
         embed.add_field(name='経験値', value=f"+{state['xp_reward']['xp']} XP", inline=False)
     return embed

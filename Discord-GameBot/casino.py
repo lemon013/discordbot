@@ -103,7 +103,9 @@ class CasinoStore:
         if not 0 <= balance <= MAX_BALANCE:
             raise CasinoError('ジュエルの保有上限を超えるため処理できません。')
         reserved = db.execute(
-            'SELECT COALESCE(SUM((amount * 5 + 3) / 4), 0) FROM party_wagers WHERE guild_id=? AND user_id=?',
+            '''SELECT COALESCE(SUM(
+                (SELECT SUM(amount) FROM party_wagers AS pot WHERE pot.game_id = entry.game_id) * 5 / 4
+            ), 0) FROM party_wagers AS entry WHERE guild_id=? AND user_id=?''',
             (guild_id, user_id),
         ).fetchone()[0]
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='blackjack_rounds'").fetchone():
@@ -328,7 +330,7 @@ class Casino:
                         '`/casino coinflip`：表・裏を当てると2倍。\n'
                         '`/casino dice`：1〜6を当てると6倍。\n'
                         '`/casino highlow`：1〜13の2枚目が1枚目より高いか低いかを予想。当たりは13/6倍（約2.17倍）。同値は外れ。\n'
-                        '`/casino blackjack`：ヒット・スタンドで21を目指す。通常勝利2倍、最初の21は2.5倍、引き分けは返却。\n'
+                        '`/casino blackjack`：ヒット・スタンドで21を目指す。通常勝利2.25倍（端数切り上げ）、最初の21は2.5倍、引き分けは返却。\n'
                         '賭け金：10〜10,000。倍率は賭け金を含む払い戻しで、原則小数点以下切り捨て。外れは0。\n'
                         'ジュエルはこのサーバー内のゲーム用通貨です。')
             await interaction.edit_original_response(content=text, allowed_mentions=discord.AllowedMentions.none())

@@ -6,6 +6,10 @@ from shop import ShopStore
 from leveling import DEFAULTS, level_for
 
 
+def wager_share(total, winner_count):
+    return total * 5 // (4 * winner_count) if winner_count else 0
+
+
 class PartyRewards(ShopStore):
     def reserve_wager(self, guild_id, game_id, users, amount):
         if not isinstance(amount, int) or not 1 <= amount <= MAX_BET:
@@ -31,10 +35,11 @@ class PartyRewards(ShopStore):
         rows = db.execute('SELECT * FROM party_wagers WHERE game_id=?', (game_id,)).fetchall()
         if outcomes is not None and rows and set(outcomes) != {row['user_id'] for row in rows}:
             raise ValueError('Wager participants do not match the game result')
+        share = wager_share(sum(row['amount'] for row in rows), sum(outcomes.values())) if outcomes else 0
         db.execute('DELETE FROM party_wagers WHERE game_id=?', (game_id,))
         for row in rows:
             guild_id, uid, amount = row['guild_id'], row['user_id'], row['amount']
-            payout = amount if outcomes is None else (amount * 5 + 3) // 4 if outcomes[uid] else 0
+            payout = amount if outcomes is None else share if outcomes[uid] else 0
             balance = self.casino.wallet(db, guild_id, uid)['balance']
             kind = 'party_refund' if outcomes is None else 'party_payout'
             self.casino.finish(db, f'party-settle:{game_id}:{uid}', guild_id, uid, kind, balance,
