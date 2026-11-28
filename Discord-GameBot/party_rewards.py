@@ -1,10 +1,58 @@
+import asyncio
 from contextlib import closing
 import time
+from casino import CasinoError, MAX_BET
 from shop import ShopStore
 from leveling import DEFAULTS, level_for
 
 
 class PartyRewards(ShopStore):
+    def reserve_wager(self, guild_id, game_id, users, amount):
+        if not isinstance(amount, int) or not 1 <= amount <= MAX_BET:
+            raise CasinoError('賭け金は1〜10,000ジュエルで指定してください。')
+        now = time.time()
+        with closing(self.casino.connect()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            for uid in users:
+                balance = self.casino.wallet(db, guild_id, uid)['balance']
+                if balance < amount:
+                    raise CasinoError(f'参加者（ID: {uid}）のジュエルが不足しています。賭け金は引かれていません。')
+                event = f'party-bet:{game_id}:{uid}'
+                self.casino.finish(db, event, guild_id, uid, 'party_bet', balance,
+                                   {'balance': balance - amount}, now)
+                db.execute('INSERT INTO party_wagers VALUES(?,?,?,?,?)',
+                           (game_id, guild_id, uid, amount, now + 3600))
+            # Validate payout headroom after all holds have been recorded.
+            for uid in users:
+                balance = self.casino.wallet(db, guild_id, uid)['balance']
+                self.casino.check_balance(db, guild_id, uid, balance)
+
+    def _settle_wager(self, db, game_id, outcomes):
+        rows = db.execute('SELECT * FROM party_wagers WHERE game_id=?', (game_id,)).fetchall()
+        if outcomes is not None and rows and set(outcomes) != {row['user_id'] for row in rows}:
+            raise ValueError('Wager participants do not match the game result')
+        db.execute('DELETE FROM party_wagers WHERE game_id=?', (game_id,))
+        for row in rows:
+            guild_id, uid, amount = row['guild_id'], row['user_id'], row['amount']
+            payout = amount if outcomes is None else (amount * 5 + 3) // 4 if outcomes[uid] else 0
+            balance = self.casino.wallet(db, guild_id, uid)['balance']
+            kind = 'party_refund' if outcomes is None else 'party_payout'
+            self.casino.finish(db, f'party-settle:{game_id}:{uid}', guild_id, uid, kind, balance,
+                               {'balance': balance + payout, 'payout': payout}, time.time())
+
+    def settle_wager(self, game_id, outcomes=None):
+        with closing(self.casino.connect()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            self._settle_wager(db, game_id, outcomes)
+
+    def refund_expired_wagers(self):
+        with closing(self.casino.connect()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            games = db.execute('SELECT DISTINCT game_id FROM party_wagers WHERE expires_at<=?',
+                               (time.time(),)).fetchall()
+            for row in games:
+                self._settle_wager(db, row['game_id'], None)
+
     def grant(self, guild_id, user_id, game_id, won):
         event = f'party:{game_id}:{user_id}'
         with closing(self.casino.connect()) as db, db:
@@ -39,8 +87,8 @@ class PartyRewards(ShopStore):
 
 
 async def reward_party(bot, guild, channel, game_id, outcomes):
-    import asyncio
     store = bot.party_rewards
+    await asyncio.to_thread(store.settle_wager, game_id, outcomes)
     for user_id, won in outcomes.items():
         from xp_role_bonus import remember_roles
         await remember_roles(bot, guild, user_id)
