@@ -15,7 +15,14 @@ from youtube_rules import (MAX_BYTES, SoundError, MAX_DURATION, MAX_QUEUE, SEARC
                            normalize_url, normalize_playlist, normalize_search)
 
 DOWNLOAD_TIMEOUT = 110
-WORKER_MEMORY_MIB = 350
+def worker_memory_budget():
+    try:
+        return max(350, int(os.getenv('YOUTUBE_WORKER_MEMORY_MIB', '512')))
+    except ValueError:
+        return 512
+
+
+WORKER_MEMORY_MIB = worker_memory_budget()
 _worker_gates = weakref.WeakKeyDictionary()
 log = logging.getLogger(__name__)
 ERRORS = {
@@ -128,7 +135,7 @@ async def _run_worker(url, destination, playlist=False, search=False):
     environment['PYTHONPATH'] = os.pathsep.join(os.path.abspath(item or os.getcwd()) for item in sys.path)
     # Override inherited Node options: no preloads or unrelated Bot flags in the worker.
     # This bounds V8 old-space, not the complete Node/process RSS.
-    environment['NODE_OPTIONS'] = '--max-old-space-size=128 --max-semi-space-size=2'
+    environment['NODE_OPTIONS'] = '--max-old-space-size=192 --max-semi-space-size=2'
     mode = ['search'] if search else ['playlist'] if playlist else []
     arguments = [sys.executable, '-u', str(worker), url, str(destination)] + mode
     process = await asyncio.create_subprocess_exec(*arguments,
