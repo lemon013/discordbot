@@ -172,7 +172,7 @@ def recruitment_embed(game):
     names = [safe_name(p.user) for p in game.players.values()]
     embed.add_field(name=f'参加者 ({len(names)}/{MAX_PLAYERS})', value='\n'.join('• '+n for n in names) or 'まだいません', inline=False)
     embed.add_field(name='現在の設定', value=(f'最大ウルフ数：{game.max_wolves}人\n1人あたりのNGワード数：{game.ng_count}個\nウルフなし試合：{"有効（20%）" if game.allow_no_wolf else "無効"}\nNGワード：{"有効" if game.ng_enabled else "無効"}\nNG違反時の役職公開：{"有効" if game.reveal_role_on_ng else "無効"}\nNG違反したウルフの即終了：{"有効" if game.end_if_wolf_ng else "無効"}'), inline=False)
-    wager = f'{game.wager:,}ジュエル／人。勝者に1.25倍（切り上げ）を追加。' if game.wager else 'なし'
+    wager = f'{game.wager:,}ジュエル／人。賭け金の総額×1.25を勝者で山分け（端数切り捨て）。' if game.wager else 'なし'
     embed.add_field(name='賭けジュエル', value=wager, inline=False)
     embed.set_footer(text=f'募集主ID: {game.host_id} | 最低{MIN_PLAYERS}人')
     return embed
@@ -480,11 +480,12 @@ async def resolve_votes(channel, game):
             await channel.send('**全員の役職・お題・NGワード**\n'+chunk); chunk = ''
         chunk += line+'\n'
     if chunk: await channel.send('**全員の役職・お題・NGワード**\n'+chunk)
-    from party_rewards import reward_party
+    from party_rewards import reward_party, wager_share
     await reward_party(bot, channel.guild, channel, game.reward_id, outcomes)
     games.pop(game.guild_id, None)
     if game.wager and any(outcomes.values()):
-        await channel.send(f'勝利者に1人あたり 💎 {(game.wager * 5 + 3) // 4:,} の賭け報酬を追加しました。')
+        share = wager_share(game.wager * len(outcomes), sum(outcomes.values()))
+        await channel.send(f'勝利者に1人あたり 💎 {share:,} の賭け報酬を追加しました。')
 
 
 async def finish_by_wolf_ng(channel, game, player, word):
@@ -516,7 +517,7 @@ async def finish_by_wolf_ng(channel, game, player, word):
         chunk += line + '\n'
     if chunk:
         await channel.send('**全員の役職・お題・NGワード**\n' + chunk)
-    from party_rewards import reward_party
+    from party_rewards import reward_party, wager_share
     await reward_party(bot, channel.guild, channel, game.reward_id, outcomes)
     games.pop(game.guild_id, None)
 
