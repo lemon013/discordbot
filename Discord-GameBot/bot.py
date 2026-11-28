@@ -1,4 +1,7 @@
 import os, random, logging, unicodedata
+import subprocess
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
 import discord
@@ -519,6 +522,37 @@ async def on_ready():
             guild = discord.Object(id=int(TEST_GUILD_ID)); bot.tree.copy_global_to(guild=guild); await bot.tree.sync(guild=guild)
         else: await bot.tree.sync()
     except Exception: log.exception('Command sync failed')
+
+def running_version_message() -> str:
+    """Capture deployment information once for the lifetime of this process."""
+    jst = timezone(timedelta(hours=9))
+    started = datetime.now(jst)
+    root = Path(__file__).resolve().parents[1]
+    updated = '取得できません'
+    if (root / '.git').exists():
+        try:
+            result = subprocess.run(
+                ['git', 'log', '-1', '--format=%cI', 'HEAD'],
+                cwd=root, capture_output=True, text=True, check=True, timeout=3,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            )
+            committed = datetime.fromisoformat(result.stdout.strip()).astimezone(jst)
+            updated = committed.strftime('%Y-%m-%d %H:%M:%S JST')
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+    return (
+        f'コード更新日時：{updated}\n'
+        f'Bot起動日時：{started:%Y-%m-%d %H:%M:%S} JST'
+    )
+
+
+RUNNING_VERSION_MESSAGE = running_version_message()
+
+
+@bot.tree.command(name='version', description='稼働中のBotの更新日時と起動日時を表示します')
+async def version(interaction: discord.Interaction):
+    await interaction.response.send_message(RUNNING_VERSION_MESSAGE, ephemeral=True)
+
 
 # Bridgeは同じBotアカウントでDiscordへ接続するが、Minecraftの処理はNode.js側が担当する。
 # ここではコマンド定義だけを一括同期し、Bridgeが受け取ったInteractionへ応答する。
