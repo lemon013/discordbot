@@ -9,6 +9,7 @@ import uuid
 
 import discord
 from discord import app_commands
+from casino import CasinoError, MAX_BET
 from party_rewards import reward_party
 
 log = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ class VoteSelect(discord.ui.Select):
 
 
 class SocialGame(discord.ui.View):
-    def __init__(self, bot, interaction, registry, kind, allow_duplicates=False):
+    def __init__(self, bot, interaction, registry, kind, allow_duplicates=False, wager=0):
         super().__init__(timeout=None)
         self.bot, self.guild, self.channel = bot, interaction.guild, interaction.channel
         self.registry, self.kind = registry, kind
@@ -92,6 +93,7 @@ class SocialGame(discord.ui.View):
         self.minimum, self.maximum = (2, 10) if kind == 'ito' else (4, 8)
         self.phase = 'lobby'
         self.allow_duplicates = allow_duplicates
+        self.wager = wager
         self.game_id = f'{kind}:{uuid.uuid4().hex}'
         self.topic = ''
         self.numbers, self.hints, self.votes = {}, {}, {}
@@ -140,6 +142,9 @@ class SocialGame(discord.ui.View):
                  '募集主が公開マスター、ほかの1人が秘密のインサイダー。5分でお題を当て、その後に正体を探そう。\n'
                  'Bot版：議論3分→一斉投票1分。同票・全員未投票はインサイダー勝利。') +
                 '\n\n勝利：100ジュエル＋10XP／敗北：50ジュエル＋5XP\n中止・準備中の時間切れは報酬なし。')
+            if self.kind == 'insider':
+                wager = f'{self.wager:,}ジュエル／人。勝者に1.25倍（切り上げ）を追加。' if self.wager else 'なし'
+                embed.add_field(name='賭けジュエル', value=wager, inline=False)
         elif self.phase == 'ito':
             embed.description = f'お題：**{self.topic}**\n1＝低い・弱い、100＝高い・強い。\n全員のヒントがそろったら、相談して小さいと思う人から出してください。'
             for uid, user in self.players.items():
@@ -162,7 +167,8 @@ class SocialGame(discord.ui.View):
             embed.description = self.result
             if self.outcomes is not None:
                 reward_text = '\n'.join(f'{clean(self.players[uid].display_name)}：'
-                    + ('100ジュエル＋10XP' if won else '50ジュエル＋5XP') for uid, won in self.outcomes.items())
+                    + ('100ジュエル＋10XP' if won else '50ジュエル＋5XP')
+                    + (f'＋賭け報酬 {(self.wager * 5 + 3) // 4:,}ジュエル' if won and self.wager else '') for uid, won in self.outcomes.items())
                 embed.add_field(name='報酬（一部未処理：再試行が必要）' if self.rewards_pending else '報酬', value=reward_text, inline=False)
         if self.kind == 'ito' and self.phase in ('lobby', 'ito'):
             embed.add_field(name='数字の重複', value='あり（同じ数字はどちらが先でもOK）' if self.allow_duplicates else 'なし', inline=False)
@@ -207,6 +213,8 @@ class SocialGame(discord.ui.View):
             self.stop()
 
     async def cancel(self, reason):
+        if self.wager:
+            await asyncio.to_thread(self.bot.party_rewards.settle_wager, self.game_id)
         self.phase, self.result = 'cancelled', reason
         if self.timer and self.timer is not asyncio.current_task():
             self.timer.cancel()
@@ -312,6 +320,13 @@ class SocialGame(discord.ui.View):
                     self.topic, self.phase = RNG.choice(ITO_TOPICS), 'ito'
                     self.arm(600); await self.update(); reply = '開始！自分の数字を確認し、ヒントを入力してください。'
                 else:
+                    if self.wager:
+                        try:
+                            await asyncio.to_thread(self.bot.party_rewards.reserve_wager,
+                                                    self.guild.id, self.game_id, tuple(self.players), self.wager)
+                        except CasinoError as error:
+                            await interaction.edit_original_response(content=str(error))
+                            return
                     self.insider = RNG.choice([player for player in self.players if player != self.host])
                     self.topic, self.phase = RNG.choice(INSIDER_TOPICS), 'briefing'
                     self.arm(180); await self.update(); reply = '全員が役職を確認したら、クイズを開始してください。'
@@ -374,7 +389,7 @@ def register_social_games(bot):
             await interaction.edit_original_response(content=f'このサーバーでは {game.kind} が進行中です。' +
                 (f'\n{game.board.jump_url}' if game.board else ''), allowed_mentions=discord.AllowedMentions.none())
             return
-        game = SocialGame(bot, interaction, games, kind, allow_duplicates)
+        game = SocialGame(bot, interaction, games, kind, allow_duplicates, wager)
         games[interaction.guild_id] = game
         try:
             game.board = await interaction.edit_original_response(embed=game.embed(), view=game, allowed_mentions=discord.AllowedMentions.none())
@@ -391,5 +406,6 @@ def register_social_games(bot):
 
     @bot.tree.command(name='insider', description='お題を当てた後、答えを知って誘導したインサイダーを探そう')
     @app_commands.guild_only()
-    async def insider(interaction: discord.Interaction):
-        await open_game(interaction, 'insider')
+    @app_commands.describe(wager='1人あたりの賭けジュエル。0なら賭けなし')
+    async def insider(interaction: discord.Interaction, wager: app_commands.Range[int, 0, MAX_BET] = 0):
+        await open_game(interaction, 'insider', wager=wager)
