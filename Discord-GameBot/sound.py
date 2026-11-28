@@ -389,6 +389,12 @@ class Sound:
                 if cancelled and (not voice or not voice.is_connected()):
                     await self.status(interaction, '音楽キューを消去し、準備中の再生を取り消しました。')
                     return
+            if action == 'play' and getattr(self.bot, 'ticket_store', None) is not None and getattr(attachment, 'ticket_eligible', True):
+                from ticket_store import RewardAudio
+                attachment = RewardAudio(attachment, interaction.user.id, 'ticket:sound:' + str(interaction.id), 1)
+            if action == 'play' and self.music is not None:
+                await self.status(interaction, self.music.enqueue_attachment(interaction, attachment))
+                return
             lock = self.lock(interaction.guild.id)
             if lock.locked():
                 raise SoundError('音声の準備・操作中です。表示が更新されるまでお待ちください。')
@@ -396,9 +402,6 @@ class Sound:
                 if action in ('play', 'test'):
                     if action == 'test':
                         attachment = await asyncio.to_thread(make_test_tone)
-                    elif getattr(self.bot, 'ticket_store', None) is not None and getattr(attachment, 'ticket_eligible', True):
-                        from ticket_store import RewardAudio
-                        attachment = RewardAudio(attachment, interaction.user.id, 'ticket:sound:' + str(interaction.id), 1)
                     answer = await self.play(interaction, channel, attachment)
                 else:
                     voice = interaction.guild.voice_client

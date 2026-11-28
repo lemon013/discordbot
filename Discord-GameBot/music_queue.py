@@ -1,8 +1,9 @@
-"""Per-guild YouTube queues and a shared voice-channel music dashboard."""
+"""Per-guild audio queues and a shared voice-channel music dashboard."""
 import asyncio
 from collections import deque
 from dataclasses import dataclass, field
 import logging
+import shutil
 import time
 import tempfile
 from pathlib import Path
@@ -12,7 +13,7 @@ from types import SimpleNamespace
 import discord
 from discord import app_commands
 
-from sound import SoundError
+from sound import EXTENSIONS, MAX_BYTES, SoundError
 from youtube_play import YouTubeAudio, normalize_url, normalize_playlist, load_playlist, search_youtube, normalize_search, MAX_QUEUE
 
 log = logging.getLogger(__name__)
@@ -23,6 +24,30 @@ def safe_title(value):
     return discord.utils.escape_markdown(text) or 'YouTube動画'
 
 
+class QueuedAttachment:
+    """Keep a local copy for repeats after the Discord download URL expires."""
+
+    def __init__(self, attachment):
+        self.attachment = attachment
+        self.filename = attachment.filename
+        self.size = attachment.size
+        self.ticket_award = getattr(attachment, 'ticket_award', None)
+        self.cache = None
+
+    async def save(self, destination):
+        if self.cache is None:
+            cache = tempfile.TemporaryDirectory(prefix='discord-music-file-')
+            try:
+                await self.attachment.save(Path(cache.name) / 'audio')
+            except BaseException:
+                cache.cleanup()
+                raise
+            self.cache = cache
+            self.attachment = None
+        # Copy before returning so the voice source owns an independent file.
+        shutil.copyfile(Path(self.cache.name) / 'audio', destination)
+
+
 @dataclass
 class Track:
     url: str
@@ -30,7 +55,11 @@ class Track:
     requester_id: int = 0
     ticket_event: str = field(default_factory=lambda: 'ticket:play:' + uuid.uuid4().hex)
 
+    attachment: QueuedAttachment | None = None
+
     def label(self):
+        if self.attachment is not None:
+            return '📎 ' + safe_title(self.title)
         return f'[{safe_title(self.title or self.url.rsplit("=", 1)[-1])}]({self.url})'
 
 
@@ -175,7 +204,7 @@ class Music:
         if len(session.queue) > 8:
             lines.append(f'ほか {len(session.queue) - 8}曲')
         # Keep the field below Discord's 1024 UTF-16-unit limit, including emoji.
-        upcoming = '\n'.join(lines) or 'キューは空です。`/play` で追加できます。'
+        upcoming = '\n'.join(lines) or 'キューは空です。`/play` または `/sound play` で追加できます。'
         while len(upcoming.encode('utf-16-le')) // 2 > 1000:
             lines.pop()
             upcoming = '\n'.join(lines) + '\n…'
@@ -273,7 +302,7 @@ class Music:
                     session.current = session.queue.popleft()
                     session.error = ''
                     self.refresh(session)
-                    audio = YouTubeAudio(session.current.url, self.slots)
+                    audio = session.current.attachment or YouTubeAudio(session.current.url, self.slots)
                     if session.current.requester_id:
                         audio.ticket_award = (session.current.requester_id, session.current.ticket_event, 3)
                     try:
@@ -286,7 +315,8 @@ class Music:
                         session.current, session.source = None, None
                         self.refresh(session)
                         continue
-                    session.current.title = audio.filename.removesuffix('.webm')
+                    if session.current.attachment is None:
+                        session.current.title = audio.filename.removesuffix('.webm')
                     session.source = self.sound.playing.get(session.guild.id)
                     self.prepare_next(session)
                     self.refresh(session)
@@ -305,7 +335,7 @@ class Music:
         if session is None:
             return
         if session.source is source:
-            # Only successful YouTube tracks repeat. Failed audio must not loop forever.
+            # Only successful tracks repeat. Failed audio must not loop forever.
             track = session.current
             if track is not None and not source.playback_error:
                 if session.loop_mode == 'queue':
@@ -358,6 +388,24 @@ class Music:
         else:
             release()
         return had_work
+
+    def enqueue_attachment(self, interaction, attachment):
+        if Path(attachment.filename).suffix.lower() not in EXTENSIONS:
+            raise SoundError('MP3・WAV・OGG・OPUS・M4A・AAC・FLAC・WEBM・MP4のファイルを添付してください。')
+        if not 0 < attachment.size <= MAX_BYTES:
+            raise SoundError('音声ファイルは25MB以内で添付してください。')
+        session = self.session_for(interaction)
+        permissions = session.channel.permissions_for(interaction.guild.me)
+        if not (permissions.view_channel and permissions.connect and permissions.speak):
+            raise SoundError('BotにこのVCの「チャンネルを見る」「接続」「発言」権限が必要です。')
+        if len(session.queue) >= MAX_QUEUE:
+            raise SoundError(f'キューは最大{MAX_QUEUE}曲です。曲が減ってから追加してください。')
+        session.queue.append(Track('', attachment.filename, attachment=QueuedAttachment(attachment)))
+        self.sound.cancel_idle(session.guild.id)
+        self.kick(session)
+        self.prepare_next(session)
+        self.refresh(session)
+        return '✅ 添付ファイルを音楽キューに追加しました。 /music で確認できます。'
 
     async def enqueue(self, interaction, url):
         ack_started = time.monotonic()
